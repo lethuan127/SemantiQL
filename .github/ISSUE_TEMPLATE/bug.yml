@@ -1,0 +1,42 @@
+name: Bug report
+description: Something behaves differently from what the docs say
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please don't report security problems here — use the Security tab's
+        "Report a vulnerability" button instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest semantic query and model that shows the problem.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD`, or the release tag.
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `uv run python --version`.
+    validations:
+      required: true

@@ -1,0 +1,42 @@
+# CI runs the same script a contributor runs locally, so the two cannot disagree (FR-6).
+#
+# It must complete on a pull request from a fork, which means: no repository secrets, and
+# a read-only token. A pipeline that needs a secret fails on every external contribution,
+# which is the trap that catches most first-time public repos. Anything needing
+# credentials — publishing, integration tests against a real service — belongs in a
+# separate workflow triggered on push to main, never here.
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the declared floor, so it is tested rather than merely asserted.
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Pin Python ${{ matrix.python-version }}
+        run: uv python pin ${{ matrix.python-version }}
+
+      - name: Verify
+        run: ./scripts/verify.sh

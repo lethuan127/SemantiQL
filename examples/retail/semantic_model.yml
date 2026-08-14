@@ -1,0 +1,46 @@
+# The semantic model is the source of truth (constitution N3): reviewable, diffable,
+# and independent of which database executes it. Swapping `datasource.dialect` to
+# postgres changes nothing else in this file.
+version: 1
+
+datasource:
+  name: retail
+  dialect: duckdb
+
+tables:
+  orders:
+    # DuckDB reads the CSV directly, so the example needs no database installed.
+    # A relative source resolves against this file, not the process cwd, so the
+    # model works from any directory.
+    source: orders.csv
+
+    dimensions:
+      channel:
+        column: channel
+        type: string
+        label: Sales channel
+        description: How the order was placed — web, retail, or partner.
+      region:
+        column: region
+        type: string
+        label: Region
+      order_date:
+        column: order_date
+        type: date
+        label: Order date
+
+    measures:
+      revenue:
+        column: amount
+        agg: sum
+        label: Revenue
+        description: Sum of order amounts. The one sanctioned definition of revenue.
+      order_count:
+        column: order_id
+        agg: count
+        label: Orders
+        description: Number of order lines.
+      average_order_value:
+        column: amount
+        agg: avg
+        label: Average order value

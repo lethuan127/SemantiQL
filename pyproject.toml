@@ -1,0 +1,69 @@
+[project]
+name = "semantiql"
+version = "0.0.1"
+description = "A semantic layer that lets AI query your database accurately."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Thuan Le" }]
+keywords = ["semantic-layer", "sql", "duckdb", "llm", "mcp"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Database",
+]
+dependencies = [
+  "sqlglot>=30,<31",
+  "duckdb>=1.0",
+  "pydantic>=2.6",
+  "pyyaml>=6",
+]
+
+[project.scripts]
+semantiql = "semantiql.cli:main"
+
+[project.urls]
+Repository = "https://github.com/lethuan127/semantiql"
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "types-pyyaml>=6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/semantiql"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+# .claude/ and .specify/ hold agent tooling, including a vendored copy of the OKF
+# validator whose canonical source lives in another repo. Reformatting a derived copy
+# would break the canonicality rule the constitution sets, so they are out of scope.
+extend-exclude = [".claude", ".specify"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests", "scripts"]
+strict = true
+# duckdb ships no stubs; treat its surface as untyped rather than weakening strict globally.
+[[tool.mypy.overrides]]
+module = ["duckdb.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

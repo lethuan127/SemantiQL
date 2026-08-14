@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run the same gate CI runs, before the commit exists.
+#
+# Versioned in .githooks/ rather than left in .git/hooks/ so every contributor gets it from
+# a clone. Enable with:
+#
+#     git config core.hooksPath .githooks
+#
+# (or run ./scripts/install-hooks.sh, which does exactly that)
+#
+# HONEST LIMITATION: this checks the **working tree**, not the staged snapshot. If you stage
+# only part of your changes, the hook validates what is on disk, which may differ from what
+# you are committing. Catching that properly means stashing unstaged changes, which can lose
+# work when it goes wrong — not a trade worth making silently. CI checks the real commit.
+#
+# To bypass deliberately: git commit --no-verify
+
+set -euo pipefail
+
+# Nothing staged (e.g. `git commit --amend --only`) → nothing to check.
+if git diff --cached --quiet --diff-filter=ACMR; then
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+if [ ! -x scripts/verify.sh ]; then
+  echo "pre-commit: scripts/verify.sh missing or not executable — skipping" >&2
+  exit 0
+fi
+
+printf '\033[1mpre-commit → ./scripts/verify.sh\033[0m\n'
+
+if ! ./scripts/verify.sh; then
+  cat >&2 <<'EOF'
+
+────────────────────────────────────────────────────────────
+Commit blocked: the verify gate failed.
+
+Fix it, or if you know what you are doing:
+    git commit --no-verify
+
+Do not "fix" this by weakening a check — that turns a visible
+failure into a silent one, which this project treats as the
+worst available trade.
+────────────────────────────────────────────────────────────
+EOF
+  exit 1
+fi

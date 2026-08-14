@@ -1,0 +1,117 @@
+# SemantiQL
+
+**A semantic layer that lets AI query your database accurately.**
+
+SemantiQL sits between AI agents (LLMs) and your database. Instead of writing SQL against raw tables, the AI works with a business-friendly semantic model — dimensions, measures, and metrics — and SemantiQL translates that into correct, validated SQL for your database.
+
+## Status
+
+**Experimental, pre-release — the API will change.** Maintained by
+[@lethuan127](https://github.com/lethuan127) as time allows: issues and pull requests are
+triaged weekly, with no SLA. Open an issue before writing a large pull request.
+
+The engine below runs today: a semantic model, validation, sqlglot transpiling, and a DuckDB
+example. The MCP server, Postgres, and the accuracy benchmark are not built yet — see the
+[roadmap](#roadmap).
+
+## Quickstart
+
+Needs **Python 3.11+** and [uv](https://docs.astral.sh/uv/). No database to install.
+
+```bash
+git clone https://github.com/lethuan127/semantiql
+cd semantiql
+uv sync
+
+uv run semantiql "SELECT revenue, order_count, channel FROM orders" --show-sql
+```
+
+```
+-- SELECT channel AS channel, SUM(amount) AS revenue, COUNT(order_id) AS order_count
+--   FROM READ_CSV_AUTO('examples/retail/orders.csv') GROUP BY channel
+channel  revenue  order_count
+-------  -------  -----------
+partner  385.25   2
+web      956.5    5
+retail   344.49   3
+```
+
+`revenue` and `channel` are defined in [`examples/retail/semantic_model.yml`](examples/retail/semantic_model.yml) —
+not in the query. Ask for something the model doesn't define and it refuses rather than guessing:
+
+```bash
+$ uv run semantiql "SELECT profit FROM orders"
+refused: 'profit' is not defined on table 'orders'.
+```
+
+That refusal is the point of the project, not a limitation. Run `./scripts/verify.sh` to
+check everything the CI checks.
+
+> ⚠️ Early stage — under active development. Not ready for production use.
+
+## Why
+
+LLMs answering questions over raw SQL schemas are wrong most of the time (~16% accuracy in [published benchmarks](https://arxiv.org/abs/2405.11706)). Adding a knowledge layer raises accuracy to ~54%, and adding query validation on top reaches ~72%. SemantiQL is built around that insight: **a semantic model plus a validation layer — not a better prompt — is what makes AI-over-data reliable.**
+
+## How it works
+
+```
+┌─────────────────────────────────────────────┐
+│  AI agent (Claude via MCP, or any LLM)      │
+│  asks in semantic SQL                       │
+└──────────────────┬──────────────────────────┘
+                   ▼
+┌─────────────────────────────────────────────┐
+│  1. Semantic Knowledge                      │
+│     dimensions · measures · metrics ·       │
+│     virtual views (one YAML file, in git)   │
+├─────────────────────────────────────────────┤
+│  2. SQL Engine                              │
+│     semantic SQL → validated raw SQL        │
+│     (dialect transpiling via sqlglot)       │
+├─────────────────────────────────────────────┤
+│  3. Data Governance                         │
+│     labels · descriptions · access control  │
+│     · caching                               │
+├─────────────────────────────────────────────┤
+│  4. Database                                │
+│     DuckDB · Postgres (MVP) — more later    │
+└─────────────────────────────────────────────┘
+```
+
+## Key ideas
+
+- **One YAML file is the source of truth.** The semantic model is reviewable, diffable, and lives in git. It is database-agnostic — switch databases without rewriting the model.
+- **Validation over generation.** Every query is checked against the semantic model before it runs. A silently wrong number is the worst failure mode, so the engine blocks what it cannot verify.
+- **Self-improving, safely.** Confirmed question–query pairs become verified examples (few-shot/RAG) that improve accuracy over time — without ever touching metric definitions. Schema changes are only ever proposed as diffs for a human to review.
+- **Built for non-technical users.** The MVP integrates with Claude as an MCP server: an analyst sets it up once (`uvx semantiql init`, ≤15 minutes), end users just chat.
+
+## Roadmap
+
+| Stage | Scope |
+|---|---|
+| MVP | DuckDB + Postgres · semantic model YAML · semantic SQL → raw SQL engine · MCP server for Claude · accuracy benchmark vs. raw-table querying |
+| Next | MySQL, SQLite · verified-examples loop · `semantiql doctor` |
+| Later | BigQuery, Snowflake, Databricks · remote server mode · access control |
+
+Out of scope: NoSQL databases (MongoDB, etc.).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) — setup, how to run one test, and the invariants a
+change must not break. Vulnerabilities go through [SECURITY.md](SECURITY.md), not public
+issues.
+
+## Development
+
+Start with the [development guide](CONTRIBUTING.md) and the architecture documentation:
+[docs/02-architecture.md](docs/02-architecture.md) for the four layers and why validation is
+the centrepiece, and [docs/07-code-map.md](docs/07-code-map.md) for which module owns what.
+[docs/08-positioning.md](docs/08-positioning.md) covers how this differs from other semantic
+layers.
+
+For agents, follow [AGENTS.md](AGENTS.md).
+
+## License
+
+[MIT](LICENSE)

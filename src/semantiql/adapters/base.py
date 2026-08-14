@@ -1,0 +1,51 @@
+"""The datasource seam (constitution N4).
+
+Adding a datasource means writing one module that satisfies `Adapter` — connect,
+introspect, execute — and registering it. No change to `engine/` or `knowledge/`.
+
+This is a `Protocol` rather than a base class on purpose: a third-party adapter never
+imports or subclasses SemantiQL internals, so "one adapter, no core changes" holds for
+outside contributors too, not just for code in this repo.
+
+`execute` takes SQL that has already been validated and transpiled. Adapters do not
+validate, and they must not rewrite: the single validation chokepoint is
+`engine.run.run`, and an adapter second-guessing it would create a path where a query
+reaches data on terms nothing checked (N1).
+"""
+
+from __future__ import annotations
+
+from typing import Any, Protocol, runtime_checkable
+
+from sqlglot import exp
+
+
+class AdapterError(Exception):
+    """The datasource could not be reached, or rejected the SQL."""
+
+
+@runtime_checkable
+class Adapter(Protocol):
+    """What SemantiQL needs from a datasource."""
+
+    @property
+    def dialect(self) -> str:
+        """The sqlglot dialect name SQL must be transpiled to before `execute`."""
+        ...
+
+    def relation(self, source: str) -> exp.Expr:
+        """Turn a model `source` into a relation expression this datasource can select from.
+
+        Returns a **built expression**, never a SQL string: a string would be re-parsed by
+        the compiler, letting a quote inside `source` escape into the FROM clause. Build it
+        with `exp.to_table` or `exp.func` and the value stays a value.
+        """
+        ...
+
+    def columns(self, relation: str) -> list[str]:
+        """Column names available in `relation` — used to check the model against reality."""
+        ...
+
+    def execute(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
+        """Run already-validated, already-transpiled SQL. Returns (column names, rows)."""
+        ...
