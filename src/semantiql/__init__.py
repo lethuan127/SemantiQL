@@ -10,11 +10,15 @@ The four architectural layers map to these modules; see docs/07-code-map.md.
 Query through `semantiql.run`. It is the single validated path to the data.
 """
 
+from importlib import metadata as _metadata
+
 from semantiql.engine.run import Result, run
 from semantiql.engine.validate import Refusal
 from semantiql.knowledge.loader import ModelError, load_model
 from semantiql.knowledge.model import SemanticModel
 
-__version__ = "0.0.1"
+# Read from installed metadata rather than restated here: two copies of a version drift,
+# and the one in the wheel is the one users actually have. pyproject.toml is authoritative.
+__version__ = _metadata.version("semantiql")
 
 __all__ = ["ModelError", "Refusal", "Result", "SemanticModel", "load_model", "run"]
