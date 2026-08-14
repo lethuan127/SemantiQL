@@ -15,6 +15,9 @@
 # To release: bump `version` in pyproject.toml, commit, then tag and push:
 #
 #     git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+#
+# To test the trust chain without releasing, run this workflow manually from the Actions
+# tab: it builds and talks to PyPI, but stops short of uploading.
 name: publish
 
 on:
@@ -52,6 +55,7 @@ jobs:
           enable-cache: true
 
       - name: Tag must match the version in pyproject.toml
+        if: github.event_name == 'push' 
         # Catches the easy mistake of tagging v0.2.0 while the manifest still says 0.1.0,
         # which would publish a version nobody can find from the tag.
         run: |
@@ -71,4 +75,12 @@ jobs:
 
       - name: Publish to PyPI
         # No credentials: uv detects the Trusted Publishing environment.
+        if: github.event_name == 'push'
         run: uv publish --trusted-publishing always
+
+      - name: Dry run (manual dispatch only)
+        # Running this workflow by hand exercises the trust chain — OIDC token, PyPI
+        # exchange, build — without uploading. A version number cannot be reused, so
+        # having a way to test the plumbing that does not spend one is worth the branch.
+        if: github.event_name == 'workflow_dispatch'
+        run: uv publish --trusted-publishing always --dry-run
