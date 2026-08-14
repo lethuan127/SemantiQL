@@ -28,7 +28,7 @@ jobs:
         # 3.11 is the declared floor, so it is tested rather than merely asserted.
         python-version: ["3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
