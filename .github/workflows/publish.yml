@@ -1,0 +1,74 @@
+# Publish to PyPI on a version tag, using Trusted Publishing.
+#
+# There is no API token anywhere in this workflow or in repository secrets. GitHub mints a
+# short-lived OIDC token for this specific workflow in this specific repository, and PyPI
+# exchanges it for a one-time upload credential. Nothing long-lived exists to leak.
+#
+# That requires `id-token: write`, and a matching publisher registered on PyPI under
+# Project → Settings → Publishing. The four values must match exactly:
+#
+#     owner       lethuan127
+#     repository  SemantiQL
+#     workflow    publish.yml
+#     environment pypi
+#
+# To release: bump `version` in pyproject.toml, commit, then tag and push:
+#
+#     git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+name: publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Never publish something that does not pass the same gate as everything else. A bad
+  # release cannot be unpublished — PyPI refuses to reuse a version number even after a
+  # deletion — so this runs before anything is built for upload.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: ./scripts/verify.sh
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # the whole point: OIDC instead of a stored token
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Tag must match the version in pyproject.toml
+        # Catches the easy mistake of tagging v0.2.0 while the manifest still says 0.1.0,
+        # which would publish a version nobody can find from the tag.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(uv version --short)"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag v${tag} does not match pyproject version ${manifest}"
+            echo "bump the version in pyproject.toml, or retag to v${manifest}"
+            exit 1
+          fi
+          echo "tag and manifest agree on ${manifest}"
+
+      - name: Build
+        # --no-sources builds the way an outside tool would, so a package that only works
+        # because of the local checkout fails here rather than for the first user.
+        run: uv build --no-sources
+
+      - name: Publish to PyPI
+        # No credentials: uv detects the Trusted Publishing environment.
+        run: uv publish --trusted-publishing always
