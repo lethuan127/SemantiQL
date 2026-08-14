@@ -128,6 +128,13 @@ def validate(sql: str, model: SemanticModel) -> ValidRequest | Refusal:
 
     if isinstance(parsed, exp.Union | exp.Except | exp.Intersect):
         return Refusal("Set operations (UNION, EXCEPT, INTERSECT) are not supported.")
+    if isinstance(parsed, exp.Column):
+        # sqlglot parses a bare word as a column reference. Telling someone who typed
+        # "hello" that only SELECT is supported explains nothing.
+        return Refusal(
+            f"{sql.strip()!r} does not look like a query. Semantic SQL looks like "
+            "'SELECT <measure>, <dimension> FROM <table>'."
+        )
     if not isinstance(parsed, exp.Select):
         return Refusal(
             f"Only SELECT is supported, and this is {type(parsed).__name__.upper()}; "

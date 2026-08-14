@@ -17,6 +17,14 @@ from semantiql.knowledge.loader import ModelError, load_model
 
 EXAMPLE_MODEL = "examples/retail/semantic_model.yml"
 
+#: Verbs the docs and roadmap promise but that are not built yet. Without this, `semantiql
+#: init` is parsed as SQL and answered with "Only SELECT is supported, and this is COLUMN"
+#: — a confusing message from the validation layer about a command the README advertises.
+NOT_YET_IMPLEMENTED = {
+    "init": "the guided setup wizard that generates a semantic model from your database",
+    "doctor": "the setup health check",
+}
+
 
 def _render(result: Result) -> str:
     widths = [len(c) for c in result.columns]
@@ -50,6 +58,17 @@ def main(argv: list[str] | None = None) -> int:
     if not args.sql:
         parser.print_help()
         return 0
+
+    verb = args.sql.strip().lower()
+    if verb in NOT_YET_IMPLEMENTED:
+        print(
+            f"semantiql {verb} is not implemented yet — {NOT_YET_IMPLEMENTED[verb]}.\n\n"
+            "It is on the roadmap. What works today is querying an existing semantic model:\n\n"
+            f'    semantiql "SELECT revenue, channel FROM orders" -m {EXAMPLE_MODEL}\n\n'
+            "See the Quickstart in README.md.",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         model = load_model(args.model)

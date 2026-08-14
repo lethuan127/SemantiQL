@@ -1,0 +1,25 @@
+# The dependency set is deliberately small, and one of its pins exists because a major
+# version bump broke us: `sqlglot>=30,<31` is upper-bounded because sqlglot 30 renamed the
+# AST argument keys the validator reads. That is exactly the class of change worth being
+# told about rather than discovering at runtime.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      # Matches the Conventional Commits rule the commit-msg hook enforces.
+      prefix: "build"
+      include: scope
+    groups:
+      dev-tooling:
+        patterns: ["ruff", "mypy", "pytest*", "types-*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
