@@ -32,10 +32,16 @@ uv sync                  # venv + dependencies from uv.lock
 While iterating:
 
 ```bash
-uv run pytest tests/test_compile.py::test_transpiles_to_another_dialect   # one test
-uv run ruff format . && uv run ruff check --fix .                          # fix style
-uv run mypy                                                                # strict
+uv run pytest tests/test_compile.py::test_each_predicate_renders   # one test
+uv run pytest -m "not e2e"                                         # skip the slow suite
+uv run ruff format . && uv run ruff check --fix .                  # fix style
+uv run mypy                                                        # strict
 ```
+
+Two suites. `tests/*.py` run against the ten-row `examples/retail/` corpus with hand-computed
+totals. `tests/e2e/` generates a TPC-H corpus and checks the engine against hand-written
+physical SQL — scale it with `SEMANTIQL_E2E_SF`, and expect it to skip offline on a first run
+because the generator extension is fetched once from DuckDB's repository.
 
 `./scripts/verify.sh` must pass before you propose a change. It stops at the first failure
 and names the step.

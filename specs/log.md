@@ -1,6 +1,12 @@
 # Update Log
 
 ## 2026-08-16
+* **Update**: Shipped 008 — end-to-end suite over a locally generated TPC-H corpus: 27 tests checking the engine against hand-written SQL, plus an edge table for the nulls, booleans and zero divisors TPC-H lacks. Verified scale-independent at sf=0.1. **Checkpoint 3 did not fire** — the run went from the plan straight into implementation, so `tasks.md` is a record written afterwards and carries no attestation [008](/008-e2e-suite/validation.md)
+* **Creation**: Plan and impact map drafted for 008 — one session fixture generates TPC-H into a temporary DuckDB file, denormalises it to a single view, and hands tests a read-only adapter. 4 files to modify, 5 to add [008](/008-e2e-suite/plan.md)
+* **Update**: Clarified 5 ambiguities for 008 — TPC-H via `dbgen` over a download or a bespoke generator; hand-written physical SQL as the oracle rather than pinned figures; on by default at sf=0.01 with a marker; skip offline; a companion table for the nulls and booleans TPC-H provably lacks [008](/008-e2e-suite/clarifications.md)
+* **Creation**: Spec drafted for an end-to-end suite over a large dataset — seven specs have shipped against a ten-row corpus where a month holds eight rows [008](/008-e2e-suite/spec.md)
+
+## 2026-08-16
 * **Update**: Shipped 007 — 5 of 5 tasks; `DATE_TRUNC` over date dimensions with a closed five-grain vocabulary, the extract forms refused for collapsing years, 18 new test cases, verify gate green at 194 tests. One canonical statement now renders four distinct ways, the strongest N4 evidence in the repo [007](/007-time-grains/spec.md)
 * **Creation**: Plan and task list drafted for 007 — grain carried on `Projection`, GROUP BY repeats the expression, extract forms refused with a message naming `DATE_TRUNC`. 7 files to modify, 0 to add [007](/007-time-grains/plan.md)
 * **Update**: Clarified 4 ambiguities for 007 — grain in the request rather than predeclared in the model; `DATE_TRUNC` only, with `MONTH()`/`EXTRACT()` refused because they collapse years; default output name `<dimension>_<grain>`; GROUP BY the expression, not the alias [007](/007-time-grains/clarifications.md)

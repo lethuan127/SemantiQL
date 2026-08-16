@@ -81,13 +81,32 @@ It stops at the first failure and names the step. To run pieces while iterating:
 
 ```bash
 uv run pytest                                   # all tests
+uv run pytest -m "not e2e"                      # skip the end-to-end suite while iterating
 uv run pytest tests/test_compile.py             # one file
-uv run pytest tests/test_compile.py::test_transpiles_to_another_dialect   # one test
+uv run pytest tests/test_compile.py::test_alias_is_honoured_not_discarded   # one test
 uv run pytest -k refus                          # tests matching a name
 uv run ruff format .                            # fix formatting
 uv run ruff check --fix .                        # fix what is safely fixable
 uv run mypy                                      # types (strict)
 ```
+
+### The two test suites
+
+**Unit tests** run against `examples/retail/` — ten rows whose expected totals were computed
+by hand. They are exact, they need nothing installed, and they are what you run on every save.
+
+**End-to-end tests** (`tests/e2e/`, marked `e2e`) generate a TPC-H corpus into a temporary
+DuckDB file and check the engine against **hand-written physical SQL** rather than against
+pinned numbers — so a mistranslation fails the first time it runs. Sixty thousand rows and
+seven years of dates at the default scale, which costs a fraction of a second.
+
+```bash
+SEMANTIQL_E2E_SF=1 uv run pytest -m e2e         # six million rows, for a soak run
+```
+
+Building the corpus uses DuckDB's `tpch` extension, which is fetched once from DuckDB's
+extension repository. **With no network on a first run the suite skips rather than fails** —
+the clone still has to work on a plane — so if you see it skip, that is why.
 
 ## What makes a pull request mergeable
 

@@ -1,0 +1,121 @@
+# The semantic model for the end-to-end suite (spec 008).
+#
+# It sits over `sales`, a view denormalising the eight TPC-H tables — the escape hatch the
+# documentation recommends to a modeller who needs a join, used here for the same reason.
+# `edge` is a small companion table covering what TPC-H has none of: nulls, a boolean, and a
+# group whose metric divisor is zero.
+#
+# This is the largest model in the repo, and it is deliberately exhaustive: every dimension
+# type, all six aggregations, and metrics over both.
+version: 1
+
+datasource:
+  name: tpch
+  dialect: duckdb
+
+tables:
+  sales:
+    source: sales
+
+    dimensions:
+      segment:
+        column: segment
+        type: string
+        label: Market segment
+        description: The customer's market segment — five of them.
+      nation:
+        column: nation
+        type: string
+        label: Nation
+      region:
+        column: region
+        type: string
+        label: Region
+      ship_mode:
+        column: ship_mode
+        type: string
+      return_flag:
+        column: return_flag
+        type: string
+      order_date:
+        column: order_date
+        type: date
+        label: Order date
+        description: Spans 1992 to 1998, so a yearly grain has something to say.
+
+    measures:
+      net_revenue:
+        column: net_amount
+        agg: sum
+        label: Net revenue
+        description: Extended price less discount. The sanctioned revenue figure.
+      gross_revenue:
+        column: gross_amount
+        agg: sum
+      line_count:
+        column: order_id
+        agg: count
+        description: Line items, not orders — order_id repeats within an order.
+      order_count:
+        column: order_id
+        agg: count_distinct
+        description: Distinct orders. Use this, not line_count, when someone says "orders".
+      customer_count:
+        column: customer_id
+        agg: count_distinct
+      average_quantity:
+        column: quantity
+        agg: avg
+      first_order_date:
+        column: order_date
+        agg: min
+      last_order_date:
+        column: order_date
+        agg: max
+
+    metrics:
+      revenue_per_order:
+        expression: net_revenue / order_count
+        label: Revenue per order
+        description: Computed after grouping, from each group's own parts.
+      discount_given:
+        expression: gross_revenue - net_revenue
+        label: Discount given
+      lines_per_order:
+        expression: line_count / order_count
+
+  edge:
+    source: edge
+
+    dimensions:
+      label:
+        column: label
+        type: string
+        description: Null for one row, so count and count_distinct disagree here.
+      flagged:
+        column: flagged
+        type: boolean
+
+    measures:
+      total:
+        column: amount
+        agg: sum
+      row_count:
+        column: amount
+        agg: count
+      label_count:
+        column: label
+        agg: count
+        description: Counts non-null labels only — five of the six rows.
+      distinct_labels:
+        column: label
+        agg: count_distinct
+      refund_count:
+        column: refunds
+        agg: sum
+        description: Null for every quiet row, so a metric dividing by it has no divisor.
+
+    metrics:
+      amount_per_refund:
+        expression: total / refund_count
+        description: Zero or null divisor for the quiet rows — the guard's reason to exist.

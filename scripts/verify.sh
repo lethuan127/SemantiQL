@@ -33,7 +33,15 @@ step "types (mypy)"
 uv run mypy || fail "mypy"
 
 step "tests (pytest)"
-uv run pytest || fail "pytest"
+uv run pytest -m "not e2e" || fail "pytest"
+
+# The end-to-end suite builds a TPC-H corpus and checks the engine against hand-written SQL.
+# It is a separate step so its cost, and any skip reason, are visible rather than buried in
+# the unit run. Building the corpus needs DuckDB's tpch extension, fetched once from DuckDB's
+# repository — with no network on a first run the suite skips and this step still passes,
+# because the README promises a clone that runs without one.
+step "end-to-end (pytest -m e2e)"
+uv run pytest -m e2e || fail "end-to-end tests"
 
 # The change records under specs/ are an OKF bundle; conformance errors are failures.
 # Absent Python yaml this validator degrades rather than lying, so it runs under uv too.

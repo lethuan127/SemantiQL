@@ -67,3 +67,8 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# The end-to-end suite builds a 60k-row TPC-H corpus and checks the engine against
+# hand-written SQL (specs/008-e2e-suite/). It runs by default because it costs a fraction of
+# a second at the default scale, and a suite that only runs when someone remembers rots.
+# Iterating? `-m "not e2e"`. Soak run? `SEMANTIQL_E2E_SF=1`.
+markers = ["e2e: end-to-end tests over a generated corpus"]
