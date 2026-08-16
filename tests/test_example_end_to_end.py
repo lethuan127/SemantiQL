@@ -13,6 +13,8 @@ precisely the failure this project exists to prevent.
 
 from __future__ import annotations
 
+import pytest
+
 from semantiql.adapters.duckdb import DuckDBAdapter
 from semantiql.engine.run import Result, run
 from semantiql.knowledge.model import SemanticModel
@@ -52,3 +54,45 @@ def test_result_carries_the_sql_it_ran(model: SemanticModel, adapter: DuckDBAdap
     result = _result("SELECT revenue, channel FROM orders", model, adapter)
     assert "SUM" in result.sql.upper()
     assert "GROUP BY" in result.sql.upper()
+
+
+# --- Filtered answers (spec 004). Each expected figure was computed from the ten rows of
+# examples/retail/orders.csv independently of the engine, so a filter that silently widened
+# or narrowed the population fails here rather than looking plausible.
+
+EXPECTED_FILTERED = {
+    "SELECT revenue FROM orders WHERE channel = 'web'": 956.50,
+    "SELECT revenue FROM orders WHERE order_date >= '2026-07-01' "
+    "AND order_date < '2026-08-01'": 1491.74,
+    "SELECT revenue FROM orders WHERE channel = 'web' AND order_date < '2026-08-01'": 826.50,
+    "SELECT revenue FROM orders WHERE channel IN ('web', 'retail')": 1300.99,
+    "SELECT revenue FROM orders WHERE region = 'north'": 690.74,
+}
+
+
+@pytest.mark.parametrize(("sql", "expected"), sorted(EXPECTED_FILTERED.items()))
+def test_a_filtered_total_is_correct(
+    sql: str, expected: float, model: SemanticModel, adapter: DuckDBAdapter
+) -> None:
+    result = _result(sql, model, adapter)
+    assert round(float(result.rows[0][0]), 2) == expected
+
+
+def test_a_negated_filter_excludes_rather_than_includes(
+    model: SemanticModel, adapter: DuckDBAdapter
+) -> None:
+    """The inversion hazard, checked against arithmetic rather than against rendered SQL."""
+    everything = _result("SELECT revenue FROM orders", model, adapter).rows[0][0]
+    web = _result("SELECT revenue FROM orders WHERE channel = 'web'", model, adapter).rows[0][0]
+    not_web = _result("SELECT revenue FROM orders WHERE channel <> 'web'", model, adapter).rows[0][
+        0
+    ]
+    assert round(float(web) + float(not_web), 2) == round(float(everything), 2)
+    assert round(float(not_web), 2) == 729.74
+
+
+def test_a_filter_does_not_add_a_grouping(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    """Filtering on a dimension narrows the rows; only selecting one groups by it."""
+    result = _result("SELECT revenue FROM orders WHERE channel = 'web'", model, adapter)
+    assert result.columns == ["revenue"]
+    assert len(result.rows) == 1

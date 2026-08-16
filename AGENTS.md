@@ -57,10 +57,14 @@ A shortcut to an adapter is the change most likely to be rejected.
 This is a rule, not a guarantee: `Adapter.execute` takes a plain string and nothing prevents
 calling it directly. Treat it as load-bearing convention until a validated-SQL type exists.
 
-Also refused, for the same reason: any construct the compiler cannot honour — `WHERE`,
-`HAVING`, `ORDER BY`, `LIMIT`, `DISTINCT`, CTEs, subqueries, joins, `TABLESAMPLE`, `PIVOT`.
-`compile_request` rebuilds the query from the model, so an unvalidated construct would
-*vanish* and the caller would get a wrong number.
+Also refused, for the same reason: any construct the compiler cannot honour — `HAVING`,
+`ORDER BY`, `LIMIT`, `DISTINCT`, CTEs, subqueries, joins, `TABLESAMPLE`, `PIVOT`. `WHERE` is
+supported as of spec 004, but only over **dimensions**, compared to **literals** whose type
+matches the dimension's declared `type`; the predicate is rebuilt from the model rather than
+carried over, and filtering a measure is refused as needing `HAVING`.
+
+The reason refusal is the default: `compile_request` rebuilds the query from the model, so an
+unvalidated construct would *vanish* and the caller would get a wrong number.
 
 That check is an **allowlist**: `_SELECT_ARGS` and `_FROM_NODE_ARGS` in `validate.py` name
 what the compiler consumes — node types *and* the arguments each may carry — and everything

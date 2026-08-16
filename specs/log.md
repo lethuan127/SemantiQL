@@ -1,5 +1,12 @@
 # Update Log
 
+## 2026-08-16
+* **Update**: Shipped 004 — 8 of 8 tasks; `WHERE` over dimensions with typed literals, predicate rebuilt from a neutral IR, 42 new test cases, verify gate green at 132 tests. Two pre-existing tests asserting `WHERE` is refused were rewritten to the new contract, disclosed as an amendment [004](/004-filter-by-dimension/spec.md)
+* **Update**: Task list drafted — 8 tasks, one [P] pair for the derived copies [004](/004-filter-by-dimension/tasks.md)
+* **Creation**: Plan and impact map drafted — validate the WHERE into a neutral predicate IR, rebuild it in the compiler from the model. AST probe found `NOT LIKE` is `Like(negate=True)`, a scalar flag whose loss would invert a filter silently. 7 files to modify, 0 to add [004](/004-filter-by-dimension/plan.md)
+* **Update**: Clarified 5 ambiguities — neutral IR over AST reuse; explicit `CAST(… AS DATE)`; `type:` becomes enforced rather than declarative; both negation representations handled; `NOT IN` NULL behaviour documented rather than refused [004](/004-filter-by-dimension/clarifications.md)
+* **Creation**: Spec drafted for dimension filters — WHERE over dimensions with a fixed predicate set, literals typed against the dimension's declared `type`, predicate rebuilt from the model. Request contract stays SQL text (user decision, 2026-08-16): grow the subset rather than move to a structured request [004](/004-filter-by-dimension/spec.md)
+
 ## 2026-08-15
 * **Update**: Amended mid-implement — self-review found the same silent-drop class inside this change's own fix: `walk()` yields only expression nodes, so `FROM ONLY orders` and `WITH ORDINALITY` (stored as bare flags) were still accepted and dropped. `_FROM_NODES` became `_FROM_NODE_ARGS`, checking arguments as well as node types; plan gains architecture decision 5, tasks gain T8 [003](/003-refuse-unimplemented-constructs/plan.md)
 * **Update**: Shipped 003 — 8 of 8 tasks; `_UNSUPPORTED_CLAUSES` replaced by `_SELECT_ARGS` + `_FROM_NODE_ARGS` allowlists, 19 new test cases, verify gate green at 90 tests. All 6 ACs met; the ignored column qualifier (Q3) carried forward as a follow-up [003](/003-refuse-unimplemented-constructs/spec.md)

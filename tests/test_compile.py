@@ -5,11 +5,12 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 import sqlglot
 from sqlglot import exp
 
 from semantiql.engine.compile import compile_request
-from semantiql.engine.validate import ValidRequest, validate
+from semantiql.engine.validate import Refusal, ValidRequest, validate
 from semantiql.knowledge.loader import load_model
 from semantiql.knowledge.model import SemanticModel
 
@@ -129,3 +130,84 @@ def test_relation_is_never_reparsed(model: SemanticModel) -> None:
     calls = [n for n in parsed.find_all(exp.Anonymous) if n.name.lower() == "read_csv_auto"]
     assert len(calls) == 1, f"injection produced {len(calls)} reader calls: {sql}"
     assert "secret.csv" in sql  # present, but inert, inside the literal
+
+
+# --- Filters (spec 004). The predicate is rebuilt from the model, so these tests check the
+# two things a rebuild can get wrong: losing a negation, and letting a value become syntax.
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT revenue FROM orders WHERE channel = 'web'", "channel = 'web'"),
+        ("SELECT revenue FROM orders WHERE channel <> 'web'", "channel <> 'web'"),
+        ("SELECT revenue FROM orders WHERE channel IN ('web', 'retail')", "IN ('web', 'retail')"),
+        ("SELECT revenue FROM orders WHERE channel LIKE 'we%'", "channel LIKE 'we%'"),
+        ("SELECT revenue FROM orders WHERE channel IS NULL", "channel IS NULL"),
+        (
+            "SELECT revenue FROM orders WHERE order_date BETWEEN '2026-07-01' AND '2026-07-31'",
+            "BETWEEN CAST('2026-07-01' AS DATE) AND CAST('2026-07-31' AS DATE)",
+        ),
+    ],
+)
+def test_each_predicate_renders(sql: str, expected: str, model: SemanticModel) -> None:
+    compiled = compile_request(_valid(sql, model), model, relation=ORDERS, dialect="duckdb")
+    assert expected in compiled, compiled
+
+
+def test_a_negation_carried_as_a_flag_survives_the_rebuild(model: SemanticModel) -> None:
+    """`NOT LIKE` is `Like(negate=True)` — a flag, not a wrapper.
+
+    Rebuilding the node without reading it would emit `LIKE`, answering a question about web
+    orders when the caller excluded them. Nothing else in the output would look wrong.
+    """
+    compiled = compile_request(
+        _valid("SELECT revenue FROM orders WHERE channel NOT LIKE 'we%'", model),
+        model,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    assert "NOT" in compiled.upper(), compiled
+
+
+def test_a_date_filter_is_cast_not_coerced(model: SemanticModel) -> None:
+    """Engines disagree on implicit string-to-date coercion, so the cast is explicit (N3)."""
+    compiled = compile_request(
+        _valid("SELECT revenue FROM orders WHERE order_date >= '2026-07-01'", model),
+        model,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    assert "CAST('2026-07-01' AS DATE)" in compiled, compiled
+
+
+def test_a_hostile_filter_value_cannot_add_structure(model: SemanticModel) -> None:
+    """The relation-injection lesson, applied to values a caller supplies.
+
+    Every literal is built as an expression, never spliced as text, so a quote inside a filter
+    value is escaped and stays data.
+    """
+    hostile = "web' OR 1=1 --"
+    quoted = hostile.replace("'", "''")
+    compiled = compile_request(
+        _valid(f"SELECT revenue FROM orders WHERE channel = '{quoted}'", model),
+        model,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    parsed = sqlglot.parse_one(compiled, read="duckdb")
+    where = parsed.args["where"]
+    assert isinstance(where.this, exp.EQ), f"the value changed the predicate's shape: {compiled}"
+    assert where.this.expression.this == hostile, compiled
+    assert not list(parsed.find_all(exp.Or)), f"injected an OR: {compiled}"
+
+
+def test_an_unescaped_quote_is_refused_rather_than_executed(model: SemanticModel) -> None:
+    """The other half: text that breaks out of its literal never becomes a second predicate.
+
+    Written unescaped, `channel = 'web' OR 1=1 --` parses as a real `OR` whose right side is
+    not a dimension comparison, so validation refuses it. Neither route reaches the database
+    with a predicate the model did not authorise.
+    """
+    outcome = validate("SELECT revenue FROM orders WHERE channel = 'web' OR 1=1 --", model)
+    assert isinstance(outcome, Refusal), outcome

@@ -43,18 +43,20 @@ automatically — that would reintroduce guessing through the back door.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from difflib import get_close_matches
 
 import sqlglot
 from sqlglot import exp
 
-from semantiql.knowledge.model import SemanticModel
+from semantiql.knowledge.model import Dimension, SemanticModel, Table
 
-#: The only SELECT arguments this engine consumes: the projection list, and the FROM.
-#: `compile_request` reads nothing else, so any other argument present in the request is a
-#: construct that would be dropped. Adding an entry here without teaching the compiler to
-#: honour it reopens the silent-drop hole this allowlist closes.
-_SELECT_ARGS: frozenset[str] = frozenset({"expressions", "from"})
+#: The only SELECT arguments this engine consumes: the projection list, the FROM, and the
+#: filter. `compile_request` reads nothing else, so any other argument present in the request
+#: is a construct that would be dropped. Adding an entry here without teaching the compiler to
+#: honour it reopens the silent-drop hole this allowlist closes — `where` is here because
+#: spec 004 taught the compiler to build a predicate, not to make room for one.
+_SELECT_ARGS: frozenset[str] = frozenset({"expressions", "from", "where"})
 
 #: What a `FROM <one model table>` may contain: each allowed node type, and the arguments
 #: that node type may carry. `Table` holds its name parts as `Identifier`s plus an optional
@@ -96,6 +98,8 @@ _CLAUSE_LABELS: dict[str, str] = {
     "locks": "locking clause",
     "sample": "TABLESAMPLE",
     "pivots": "PIVOT (and UNPIVOT)",
+    # sqlglot files `channel IN (SELECT …)` under `query`, which no builder here reads.
+    "query": "a subquery",
 }
 
 #: A backstop for a node type reached through an allowed argument name — the one route the
@@ -104,7 +108,46 @@ _CLAUSE_LABELS: dict[str, str] = {
 _NODE_LABELS: dict[type[exp.Expr], str] = {
     exp.TableSample: "TABLESAMPLE",
     exp.Pivot: "PIVOT (and UNPIVOT)",
+    exp.Subquery: "a subquery",
+    exp.Select: "a subquery",
+    exp.Case: "CASE",
 }
+
+#: Predicate nodes a filter may contain, and the arguments each may carry. The same rule as
+#: `_FROM_NODE_ARGS`, applied inside the WHERE — and it earns its keep twice here. sqlglot
+#: puts `channel IN (SELECT …)` under an argument named `query`, which is absent below, and it
+#: represents `NOT LIKE` as `Like(negate=True)`: a bare flag whose loss would turn a request
+#: for "not web" into an answer about web. Listing the arguments means the builder either
+#: reads that flag or the request is refused; it cannot quietly invert.
+_PREDICATE_ARGS: dict[type[exp.Expr], frozenset[str]] = {
+    exp.And: frozenset({"this", "expression"}),
+    exp.Or: frozenset({"this", "expression"}),
+    exp.Not: frozenset({"this"}),
+    exp.Paren: frozenset({"this"}),
+    exp.EQ: frozenset({"this", "expression"}),
+    exp.NEQ: frozenset({"this", "expression"}),
+    exp.LT: frozenset({"this", "expression"}),
+    exp.LTE: frozenset({"this", "expression"}),
+    exp.GT: frozenset({"this", "expression"}),
+    exp.GTE: frozenset({"this", "expression"}),
+    exp.In: frozenset({"this", "expressions"}),
+    exp.Between: frozenset({"this", "low", "high"}),
+    exp.Like: frozenset({"this", "expression", "negate"}),
+    exp.Is: frozenset({"this", "expression"}),
+}
+
+#: Comparison node → the operator recorded in the IR.
+_OPERATORS: dict[type[exp.Expr], str] = {
+    exp.EQ: "=",
+    exp.NEQ: "<>",
+    exp.LT: "<",
+    exp.LTE: "<=",
+    exp.GT: ">",
+    exp.GTE: ">=",
+}
+
+#: Operators that order their values, so they say nothing on a boolean dimension.
+_ORDERING: frozenset[str] = frozenset({"<", "<=", ">", ">=", "between"})
 
 
 def _bare(arg: str) -> str:
@@ -146,18 +189,58 @@ class Projection:
     output: str
 
 
+#: A filter value, already parsed out of the request and type-checked against the dimension
+#: it is compared to. A Python value, never a sqlglot node — see `Comparison`.
+FilterValue = str | int | float | bool | date
+
+
+@dataclass(frozen=True)
+class Comparison:
+    """One predicate: a model dimension, an operator, and typed literal values.
+
+    The dimension is named as the *model* knows it, and the values are Python values. Nothing
+    the caller wrote survives into this object, which is what lets the compiler rebuild the
+    predicate rather than carry it — the same discipline the projection list already follows.
+    """
+
+    dimension: str
+    operator: str
+    values: tuple[FilterValue, ...] = ()
+
+
+@dataclass(frozen=True)
+class BoolOp:
+    """`AND` or `OR` over two predicates."""
+
+    op: str
+    operands: tuple[Predicate, ...]
+
+
+@dataclass(frozen=True)
+class Negation:
+    """`NOT`, however it was spelled — a `NOT` keyword, `NOT IN`, or `LIKE`'s negate flag."""
+
+    operand: Predicate
+
+
+Predicate = Comparison | BoolOp | Negation
+
+
 @dataclass(frozen=True)
 class ValidRequest:
     """A request proven to resolve against the model, ready to compile.
 
     `projections` preserves the order the caller asked for, so result columns come back in
     the order they were requested rather than an order the compiler found convenient.
+
+    `filter` is the request's `WHERE`, resolved to model names and typed values, or `None`.
     """
 
     table: str
     projections: tuple[Projection, ...]
     measures: tuple[str, ...]
     dimensions: tuple[str, ...]
+    filter: Predicate | None = None
 
 
 class SemanticSyntaxError(Exception):
@@ -178,6 +261,152 @@ def _projections(select: exp.Select) -> list[Projection]:
                 f"aliased, but got {projection.sql()!r}"
             )
     return out
+
+
+def _predicate_label(node: exp.Expr) -> str:
+    """How a refusal names something that has no business being in a filter."""
+    if type(node) in _NODE_LABELS:
+        return _NODE_LABELS[type(node)]
+    if isinstance(node, exp.Func):
+        return "a function"
+    if isinstance(node, exp.Binary | exp.Unary):
+        return "arithmetic"
+    return type(node).__name__.upper()
+
+
+def _filtered_dimension(node: exp.Expr, table: Table, table_name: str) -> str | Refusal:
+    """The model dimension a predicate addresses, or why it does not address one."""
+    if not isinstance(node, exp.Column):
+        return Refusal(
+            "A filter compares a dimension to a literal value, and the dimension goes on the "
+            f"left — but the left side here is {_predicate_label(node)}."
+        )
+    name = node.name
+    if name in table.measures:
+        return Refusal(
+            f"{name!r} is a measure, so filtering on it would need HAVING, which is not "
+            "supported. Filter on a dimension instead; measures are what the request computes."
+        )
+    if name not in table.dimensions:
+        return Refusal(
+            f"{name!r} is not defined on table {table_name!r}.",
+            _suggest(name, table.entity_names),
+        )
+    return name
+
+
+def _filter_value(
+    node: exp.Expr, dimension: Dimension, name: str, operator: str
+) -> FilterValue | Refusal:
+    """One literal, checked against the dimension's declared type.
+
+    This is the first code in the engine to read `type:`. Letting the database decide instead
+    would mean a modelling error surfaced as an adapter error at best, and as a silent
+    coercion at worst — engines do not agree on what comparing text to a number means.
+    """
+    kind = dimension.type
+    if operator in _ORDERING and kind == "boolean":
+        return Refusal(f"{name!r} is a boolean dimension, so {operator!r} says nothing about it.")
+    if operator in {"like"} and kind != "string":
+        return Refusal(f"LIKE needs a string dimension, and {name!r} is declared {kind}.")
+
+    if kind == "boolean":
+        if not isinstance(node, exp.Boolean):
+            return Refusal(f"{name!r} is a boolean dimension; compare it to TRUE or FALSE.")
+        return bool(node.this)
+    if isinstance(node, exp.Boolean):
+        return Refusal(f"{name!r} is declared {kind}, so TRUE/FALSE is not a value it can take.")
+    if not isinstance(node, exp.Literal):
+        return Refusal(
+            f"A filter on {name!r} must compare it to a literal value, "
+            f"not {_predicate_label(node)}."
+        )
+
+    text = str(node.this)
+    if kind == "number":
+        if node.args.get("is_string"):
+            return Refusal(f"{name!r} is a number dimension, but {text!r} is quoted text.")
+        return int(text) if text.lstrip("-").isdigit() else float(text)
+    if not node.args.get("is_string"):
+        return Refusal(f"{name!r} is a {kind} dimension, so {text} must be quoted.")
+    if kind == "date":
+        try:
+            return date.fromisoformat(text)
+        except ValueError:
+            return Refusal(
+                f"{name!r} is a date dimension, and {text!r} is not an ISO date "
+                "(YYYY-MM-DD). Refusing rather than guessing which date was meant."
+            )
+    return text
+
+
+def _filter(node: exp.Expr, table: Table, table_name: str) -> Predicate | Refusal:
+    """Resolve one predicate into the IR, or refuse it.
+
+    Allowlist-driven throughout, in both directions: the node type must be one this engine
+    builds, and every argument on it must be one the builder reads.
+    """
+    if isinstance(node, exp.Paren):
+        return _filter(node.this, table, table_name)
+
+    allowed = _PREDICATE_ARGS.get(type(node))
+    if allowed is None:
+        return _unsupported(f"{_predicate_label(node)} in a filter")
+    for arg, value in node.args.items():
+        if value and arg not in allowed:
+            return _unsupported(f"{_CLAUSE_LABELS.get(_bare(arg), _bare(arg).upper())} in a filter")
+
+    if isinstance(node, exp.And | exp.Or):
+        left = _filter(node.this, table, table_name)
+        if isinstance(left, Refusal):
+            return left
+        right = _filter(node.args["expression"], table, table_name)
+        if isinstance(right, Refusal):
+            return right
+        return BoolOp("and" if isinstance(node, exp.And) else "or", (left, right))
+
+    if isinstance(node, exp.Not):
+        inner = _filter(node.this, table, table_name)
+        return inner if isinstance(inner, Refusal) else Negation(inner)
+
+    name = _filtered_dimension(node.this, table, table_name)
+    if isinstance(name, Refusal):
+        return name
+    dimension = table.dimensions[name]
+
+    if isinstance(node, exp.Is):
+        if not isinstance(node.args.get("expression"), exp.Null):
+            return _unsupported("IS <value> in a filter")
+        return Comparison(name, "is null")
+
+    operands: list[exp.Expr]
+    if isinstance(node, exp.In):
+        operator = "in"
+        operands = list(node.args.get("expressions") or [])
+        if not operands:
+            return Refusal(f"IN needs at least one value to compare {name!r} against.")
+    elif isinstance(node, exp.Between):
+        operator = "between"
+        operands = [node.args["low"], node.args["high"]]
+    elif isinstance(node, exp.Like):
+        operator = "like"
+        operands = [node.args["expression"]]
+    else:
+        operator = _OPERATORS[type(node)]
+        operands = [node.args["expression"]]
+
+    values: list[FilterValue] = []
+    for operand in operands:
+        value = _filter_value(operand, dimension, name, operator)
+        if isinstance(value, Refusal):
+            return value
+        values.append(value)
+
+    comparison = Comparison(name, operator, tuple(values))
+    # `NOT LIKE` is a flag on the node, not a wrapper. Read it here or invert the meaning.
+    if isinstance(node, exp.Like) and node.args.get("negate"):
+        return Negation(comparison)
+    return comparison
 
 
 def _suggest(name: str, candidates: list[str]) -> list[str]:
@@ -274,9 +503,18 @@ def validate(sql: str, model: SemanticModel) -> ValidRequest | Refusal:
             f"Measures on {table_name!r}: {', '.join(sorted(table.measures)) or 'none'}."
         )
 
+    where = parsed.args.get("where") or parsed.args.get("where_")
+    predicate: Predicate | None = None
+    if where is not None:
+        resolved = _filter(where.this, table, table_name)
+        if isinstance(resolved, Refusal):
+            return resolved
+        predicate = resolved
+
     return ValidRequest(
         table=table_name,
         projections=tuple(projections),
         measures=tuple(measures),
         dimensions=tuple(dimensions),
+        filter=predicate,
     )

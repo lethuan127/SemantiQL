@@ -22,13 +22,30 @@ dimensions and measures, and nothing else. Every other clause is refused upstrea
 
 from __future__ import annotations
 
+from datetime import date
+
 import sqlglot
 from sqlglot import exp
 
-from semantiql.engine.validate import ValidRequest
-from semantiql.knowledge.model import Measure, SemanticModel
+from semantiql.engine.validate import (
+    BoolOp,
+    FilterValue,
+    Negation,
+    Predicate,
+    ValidRequest,
+)
+from semantiql.knowledge.model import Measure, SemanticModel, Table
 
 CANONICAL_DIALECT = "duckdb"
+
+_COMPARISON: dict[str, type[exp.Binary]] = {
+    "=": exp.EQ,
+    "<>": exp.NEQ,
+    "<": exp.LT,
+    "<=": exp.LTE,
+    ">": exp.GT,
+    ">=": exp.GTE,
+}
 
 _AGG: dict[str, type[exp.AggFunc]] = {
     "sum": exp.Sum,
@@ -37,6 +54,49 @@ _AGG: dict[str, type[exp.AggFunc]] = {
     "max": exp.Max,
     "avg": exp.Avg,
 }
+
+
+def _literal(value: FilterValue) -> exp.Expr:
+    """One filter value, built as an expression — never spliced into SQL as text.
+
+    A date becomes an explicit `CAST(… AS DATE)` rather than a bare string: the model is meant
+    to outlive a change of database (N3), and engines do not agree on when a string coerces to
+    a date. Being explicit means DuckDB and Postgres compare the same two things.
+    """
+    if isinstance(value, bool):  # before int — bool is an int subclass
+        return exp.true() if value else exp.false()
+    if isinstance(value, date):
+        return exp.cast(exp.Literal.string(value.isoformat()), "date")
+    if isinstance(value, int | float):
+        return exp.Literal.number(value)
+    return exp.Literal.string(value)
+
+
+def _predicate(predicate: Predicate, table: Table) -> exp.Expr:
+    """Rebuild a validated filter over the table's physical columns.
+
+    Every node here is constructed from the IR, so the caller's parsed text reaches the
+    database in exactly one form: escaped literal values. A value containing a quote is data.
+    """
+    if isinstance(predicate, BoolOp):
+        left, right = (_predicate(operand, table) for operand in predicate.operands)
+        joined = exp.And if predicate.op == "and" else exp.Or
+        return joined(this=exp.paren(left), expression=exp.paren(right))
+    if isinstance(predicate, Negation):
+        return exp.not_(exp.paren(_predicate(predicate.operand, table)))
+
+    column = exp.column(table.dimensions[predicate.dimension].column)
+    values = [_literal(value) for value in predicate.values]
+
+    if predicate.operator == "is null":
+        return exp.Is(this=column, expression=exp.null())
+    if predicate.operator == "in":
+        return exp.In(this=column, expressions=values)
+    if predicate.operator == "between":
+        return exp.Between(this=column, low=values[0], high=values[1])
+    if predicate.operator == "like":
+        return exp.Like(this=column, expression=values[0])
+    return _COMPARISON[predicate.operator](this=column, expression=values[0])
 
 
 def _aggregate(measure: Measure, alias: str) -> exp.Expr:
@@ -74,6 +134,9 @@ def compile_request(
             projections.append(exp.alias_(exp.column(dimension.column), item.output))
 
     select = exp.select(*projections).from_(relation)
+
+    if request.filter is not None:
+        select = select.where(_predicate(request.filter, table))
 
     for name in request.dimensions:
         select = select.group_by(exp.column(table.dimensions[name].column))

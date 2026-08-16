@@ -125,15 +125,20 @@ different things depending on who asked.
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `column` | string | **yes** | — | The physical column name. |
-| `type` | `string` \| `date` \| `number` \| `boolean` | no | `string` | **Declarative only today** — see the warning below. |
+| `type` | `string` \| `date` \| `number` \| `boolean` | no | `string` | Checked against filter literals — see the note below. |
 | `label` | string | no | `null` | Human-facing name. **Not consumed by any code path yet.** |
 | `description` | string | no | `null` | Meaning and gotchas. **Not consumed by any code path yet.** |
 
-> **`type` is not enforced against the database.** Nothing compares it to the physical
-> column's type, and nothing changes in the emitted SQL because of it. A `date` column
-> declared `type: boolean` loads, compiles, and returns dates. Treat `type` as documentation
-> that a future feature (time grains, formatting, introspection checks) will read — not as a
-> guarantee.
+> **`type` governs filters, not the database.** Since filters landed it is load-bearing in
+> one direction: a literal in a `WHERE` is checked against it, so `WHERE order_date >=
+> 'yesterday'` is refused as a bad date, `WHERE channel = 5` is refused as unquoted, and
+> `LIKE` is refused on anything but a `string` dimension. A `date` dimension's literals are
+> also emitted as `CAST(… AS DATE)` rather than left to each engine's coercion rules.
+>
+> What it still does **not** do is check the physical column. Nothing compares `type` to the
+> real schema, so a `date` column declared `type: boolean` loads and returns dates — it will
+> simply refuse the filters that a boolean cannot take. Declaring it correctly matters more
+> than it used to.
 
 > **`label` and `description` are written but never read.** Grep confirms it: no engine, CLI,
 > or adapter code touches them. They exist because the MCP server — the thing that will
@@ -321,7 +326,7 @@ model matches what a model tends to emit.
 | `source` does not exist | **execute** | `AdapterError` — `IO Error: No files found…` / `Catalog Error: Table … does not exist`, exit `3` |
 | `column` does not exist | **execute** | `AdapterError` — `Binder Error: Referenced column "profit" not found` |
 | `agg: sum` on a text column | **execute** | `AdapterError` — `No function matches the given name and argument types 'sum(VARCHAR)'` |
-| `type:` disagrees with the real column | **never** | none — it is not enforced (§3.4) |
+| `type:` disagrees with the real column | **never** for the read; **run** for a filter | rows come back regardless, but filter literals are checked against the declared type, so the wrong `type:` refuses valid filters (§3.4) |
 
 The bottom half of that table is the argument for `semantiql doctor` and schema
 introspection, both on the roadmap and neither built. `Adapter.columns()` exists and is
@@ -339,11 +344,10 @@ implementation.**
 
 Not expressible in the model today:
 
-- **Filters of any kind.** No model-level filter, no measure-level filter, no default filter.
-  There is no `WHERE` in the semantic model *or* in the query language — a request carrying
-  one is refused (`_SELECT_ARGS`, `validate.py`), because the compiler rebuilds the query
-  from the model and would otherwise drop the clause and answer with a confidently wrong
-  total.
+- **Filters in the *model*.** A request may carry a `WHERE` over dimensions (A.2), but the
+  model itself cannot declare one: no default filter on a table, no filter baked into a
+  measure. Filtering on a measure — `WHERE revenue > 1000`, which SQL would express as
+  `HAVING` — is refused.
 - **Derived or ratio metrics.** No `SUM(x) / COUNT(y)`, no measure referencing another
   measure, no expression as a `column`.
 - **Joins and relationships.** One table per request, and no way to declare that `orders`
@@ -394,6 +398,11 @@ Excludes cancelled orders only if the source view filters them — it does not."
 humans read it; when the MCP server lands, this text is what the model sees.
 
 **Point `count` at a non-null key.** See §4.
+
+**Remember that `<>` and `NOT IN` drop NULLs.** Standard SQL three-valued logic: a row whose
+`channel` is NULL matches neither `channel = 'web'` nor `channel <> 'web'`. The engine applies
+what you wrote rather than second-guessing it, so if NULL should count as "not web", say
+`channel IS NULL OR channel <> 'web'`.
 
 **Prefer a database view to a clever model.** The model has no expressions on purpose. A view
 is the sanctioned escape hatch.
@@ -529,7 +538,8 @@ warnings: a dropped `WHERE` returns a grand total that looks exactly like a filt
 |---|---|---|
 | `FROM <one model table>` | ✅ | — |
 | `FROM main.orders`, `FROM orders AS o` | ✅ | catalog/schema prefix and table alias are ignored, not honoured |
-| `WHERE` | ❌ | not expressible anywhere — filter in a database view and point `source` at it |
+| `WHERE` over dimensions | ✅ | `=` `<>` `<` `<=` `>` `>=` `IN` `NOT IN` `BETWEEN` `LIKE` `NOT LIKE` `IS NULL` `IS NOT NULL`, with `AND` `OR` `NOT` and parentheses. The dimension goes on the left; the other side is a literal |
+| `WHERE` over a measure | ❌ | that is `HAVING` — refused, and the refusal says so |
 | `GROUP BY` | ❌ | implicit: selecting a dimension groups by it |
 | `HAVING` | ❌ | filter the returned rows in the caller |
 | `ORDER BY` | ❌ | sort the returned rows in the caller |
@@ -614,7 +624,7 @@ where an expression can be written.
 | Date/time | `DATE_TRUNC`, `EXTRACT`, `DATE_PART`, `DATEDIFF`, `NOW()`, `CURRENT_DATE`, interval maths | ❌ — this is why `type: date` grants no time-grain ability |
 | String | `UPPER`, `LOWER`, `CONCAT`, `SUBSTRING`, `TRIM`, `REPLACE`, `REGEXP_*` | ❌ |
 | Numeric | `ROUND`, `ABS`, `FLOOR`, `CEIL` | ❌ |
-| Comparison / predicates | `=`, `>`, `BETWEEN`, `IN`, `LIKE`, `IS NULL`, `AND`, `OR`, `NOT` | ❌ — they only appear in `WHERE`/`HAVING`, both refused |
+| Comparison / predicates | `=`, `>`, `BETWEEN`, `IN`, `LIKE`, `IS NULL`, `AND`, `OR`, `NOT` | ✅ **inside `WHERE`**, against a dimension and a literal (A.2). Still ❌ anywhere else |
 | JSON / struct / array access | `x->>'k'`, `x[1]`, `UNNEST` | ❌ |
 | Window functions | `ROW_NUMBER`, `RANK`, `LAG`, `LEAD` | ❌ |
 
@@ -656,6 +666,16 @@ implements a sliver of it; so a denylist has to enumerate an open-ended set *and
 the parser chooses to hang each node — two moving targets, and a check that silently stops
 matching is worse than no check. An allowlist has to enumerate only what the compiler
 already honours, which is a list the compiler's own authors must update anyway.
+
+Filters follow the same rule one level in. `_PREDICATE_ARGS` lists the predicate nodes a
+`WHERE` may contain and the arguments each may carry, and the validator turns them into a
+neutral form — dimension name, operator, typed Python values — that the compiler rebuilds
+from. Nothing the caller wrote reaches the database except escaped literal values, and a
+predicate argument the builder does not read is a refusal rather than a drop. `IN (SELECT …)`
+is refused that way, and so is any future flag sqlglot adds to a comparison node.
+
+`where` joining `_SELECT_ARGS` in spec 004 is the rule working, not an exception to it: the
+construct became answerable in the change that taught the compiler to honour it.
 
 **The rule for contributors:** implementing a construct means adding it to the allowlist in
 the same change that teaches `compile_request` to honour it. Adding it earlier reopens the

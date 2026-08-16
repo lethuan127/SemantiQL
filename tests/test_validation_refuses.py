@@ -86,8 +86,8 @@ def test_a_valid_request_passes_validation(model: SemanticModel) -> None:
 @pytest.mark.parametrize(
     "sql",
     [
-        "SELECT revenue FROM orders WHERE channel = 'web'",
-        "SELECT revenue FROM orders WHERE amount > 1000000",
+        # `WHERE` left this list in spec 004, which taught the compiler to build a predicate.
+        # What a filter may contain is now its own suite, further down.
         "SELECT revenue, channel FROM orders HAVING SUM(amount) > 900",
         "SELECT revenue FROM orders LIMIT 1",
         "SELECT revenue FROM orders OFFSET 2",
@@ -119,9 +119,9 @@ def test_unsupported_clauses_are_refused_never_dropped(sql: str, model: Semantic
 
 def test_the_refusal_names_the_clause(model: SemanticModel) -> None:
     """A refusal a user cannot act on is only half useful."""
-    outcome = run("SELECT revenue FROM orders WHERE channel = 'web'", model, ExplodingAdapter())
+    outcome = run("SELECT revenue, channel FROM orders ORDER BY revenue", model, ExplodingAdapter())
     assert isinstance(outcome, Refusal)
-    assert "WHERE" in outcome.reason
+    assert "ORDER BY" in outcome.reason
 
 
 def test_the_refusal_names_a_table_level_clause(model: SemanticModel) -> None:
@@ -192,3 +192,66 @@ def test_case_insensitive_suggestion(model: SemanticModel) -> None:
     outcome = run("SELECT REVENUE FROM orders", model, ExplodingAdapter())
     assert isinstance(outcome, Refusal)
     assert "revenue" in outcome.did_you_mean
+
+
+# --- Filters (spec 004). A filter is applied exactly as written or refused: the population a
+# number is computed over is as load-bearing as the aggregation, and a partly-applied WHERE
+# would be a wrong number with no symptom.
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        # Not a dimension.
+        ("SELECT revenue FROM orders WHERE revenue > 100", "HAVING"),
+        ("SELECT revenue FROM orders WHERE amount > 100", "not defined"),
+        # Not a literal comparison.
+        ("SELECT revenue FROM orders WHERE UPPER(channel) = 'WEB'", "a function"),
+        ("SELECT revenue FROM orders WHERE channel = region", "literal value"),
+        ("SELECT revenue FROM orders WHERE channel IN (SELECT 1)", "subquery"),
+        ("SELECT revenue FROM orders WHERE channel = 'a' AND 1 = 1", "left side"),
+        # Type mismatches, caught against the dimension's declared `type`.
+        ("SELECT revenue FROM orders WHERE order_date >= 'yesterday'", "ISO date"),
+        ("SELECT revenue FROM orders WHERE order_date LIKE '2026%'", "LIKE needs a string"),
+        ("SELECT revenue FROM orders WHERE channel = 5", "must be quoted"),
+        ("SELECT revenue FROM orders WHERE channel = TRUE", "TRUE/FALSE"),
+    ],
+)
+def test_a_filter_it_cannot_honour_is_refused(
+    sql: str, expected: str, model: SemanticModel
+) -> None:
+    outcome = run(sql, model, ExplodingAdapter())
+    assert isinstance(outcome, Refusal), f"accepted a filter it cannot honour: {sql}"
+    assert expected in outcome.reason, f"{expected!r} not in {outcome.reason!r}"
+
+
+def test_a_misspelled_filter_dimension_suggests(model: SemanticModel) -> None:
+    outcome = run("SELECT revenue FROM orders WHERE chanel = 'web'", model, ExplodingAdapter())
+    assert isinstance(outcome, Refusal)
+    assert "channel" in outcome.did_you_mean
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT revenue FROM orders WHERE channel = 'web'",
+        "SELECT revenue FROM orders WHERE channel <> 'web'",
+        "SELECT revenue FROM orders WHERE channel IN ('web', 'retail')",
+        "SELECT revenue FROM orders WHERE channel NOT IN ('web')",
+        "SELECT revenue FROM orders WHERE channel LIKE 'we%'",
+        "SELECT revenue FROM orders WHERE channel NOT LIKE 'we%'",
+        "SELECT revenue FROM orders WHERE channel IS NULL",
+        "SELECT revenue FROM orders WHERE channel IS NOT NULL",
+        "SELECT revenue FROM orders WHERE order_date >= '2026-07-01'",
+        "SELECT revenue FROM orders WHERE order_date BETWEEN '2026-07-01' AND '2026-07-31'",
+        "SELECT revenue FROM orders WHERE order_date NOT BETWEEN '2026-07-01' AND '2026-07-31'",
+        "SELECT revenue FROM orders WHERE channel = 'web' AND region = 'north'",
+        "SELECT revenue FROM orders WHERE channel = 'web' OR region = 'north'",
+        "SELECT revenue FROM orders WHERE (channel = 'web' OR channel = 'partner') "
+        "AND region = 'north'",
+        "SELECT revenue FROM orders WHERE NOT channel = 'web'",
+        "SELECT revenue, channel FROM orders WHERE order_date < '2026-08-01'",
+    ],
+)
+def test_every_supported_predicate_validates(sql: str, model: SemanticModel) -> None:
+    assert isinstance(validate(sql, model), ValidRequest), f"refused a supported filter: {sql}"
