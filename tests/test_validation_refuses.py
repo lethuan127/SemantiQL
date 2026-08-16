@@ -89,9 +89,8 @@ def test_a_valid_request_passes_validation(model: SemanticModel) -> None:
         # `WHERE` left this list in spec 004, which taught the compiler to build a predicate.
         # What a filter may contain is now its own suite, further down.
         "SELECT revenue, channel FROM orders HAVING SUM(amount) > 900",
-        "SELECT revenue FROM orders LIMIT 1",
-        "SELECT revenue FROM orders OFFSET 2",
-        "SELECT revenue, channel FROM orders ORDER BY revenue DESC",
+        # `ORDER BY`, `LIMIT` and `OFFSET` left this list in spec 005, which taught the
+        # compiler to build them. What they may contain is its own suite, further down.
         "SELECT DISTINCT revenue FROM orders",
         "SELECT revenue, channel FROM orders GROUP BY channel",
         "WITH x AS (SELECT 1 AS revenue) SELECT revenue FROM orders",
@@ -119,9 +118,11 @@ def test_unsupported_clauses_are_refused_never_dropped(sql: str, model: Semantic
 
 def test_the_refusal_names_the_clause(model: SemanticModel) -> None:
     """A refusal a user cannot act on is only half useful."""
-    outcome = run("SELECT revenue, channel FROM orders ORDER BY revenue", model, ExplodingAdapter())
+    outcome = run(
+        "SELECT revenue, channel FROM orders HAVING SUM(amount) > 900", model, ExplodingAdapter()
+    )
     assert isinstance(outcome, Refusal)
-    assert "ORDER BY" in outcome.reason
+    assert "HAVING" in outcome.reason
 
 
 def test_the_refusal_names_a_table_level_clause(model: SemanticModel) -> None:
@@ -255,3 +256,52 @@ def test_a_misspelled_filter_dimension_suggests(model: SemanticModel) -> None:
 )
 def test_every_supported_predicate_validates(sql: str, model: SemanticModel) -> None:
     assert isinstance(validate(sql, model), ValidRequest), f"refused a supported filter: {sql}"
+
+
+# --- Ordering and limits (spec 005). Both decide what a reader actually sees, so a dropped
+# DESC or LIMIT is a wrong answer in the same way a dropped filter is.
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT revenue, channel FROM orders ORDER BY 1", "not a position"),
+        ("SELECT revenue, channel FROM orders ORDER BY SUM(amount)", "a function is not one"),
+        ("SELECT revenue, channel FROM orders ORDER BY region", "not selected by this request"),
+        ("SELECT revenue FROM orders LIMIT 1 + 1", "whole number"),
+        ("SELECT revenue FROM orders LIMIT -1", "whole number"),
+        ("SELECT revenue FROM orders LIMIT '5'", "whole number"),
+        ("SELECT revenue FROM orders OFFSET 1 + 1", "whole number"),
+    ],
+)
+def test_an_ordering_or_limit_it_cannot_honour_is_refused(
+    sql: str, expected: str, model: SemanticModel
+) -> None:
+    outcome = run(sql, model, ExplodingAdapter())
+    assert isinstance(outcome, Refusal), f"accepted an ordering it cannot honour: {sql}"
+    assert expected in outcome.reason, f"{expected!r} not in {outcome.reason!r}"
+
+
+def test_ordering_by_an_unselected_name_suggests_one_that_works(model: SemanticModel) -> None:
+    outcome = run("SELECT revenue, channel FROM orders ORDER BY revenu", model, ExplodingAdapter())
+    assert isinstance(outcome, Refusal)
+    assert "revenue" in outcome.did_you_mean
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT revenue, channel FROM orders ORDER BY revenue",
+        "SELECT revenue, channel FROM orders ORDER BY revenue DESC",
+        "SELECT revenue, channel FROM orders ORDER BY revenue ASC NULLS FIRST",
+        "SELECT revenue AS total, channel FROM orders ORDER BY total DESC",
+        "SELECT revenue AS total, channel FROM orders ORDER BY revenue DESC",
+        "SELECT revenue, channel FROM orders ORDER BY channel, revenue DESC",
+        "SELECT revenue FROM orders LIMIT 5",
+        "SELECT revenue FROM orders LIMIT 0",
+        "SELECT revenue FROM orders LIMIT 5 OFFSET 2",
+        "SELECT revenue, channel FROM orders WHERE channel <> 'web' ORDER BY revenue DESC LIMIT 1",
+    ],
+)
+def test_every_supported_ordering_validates(sql: str, model: SemanticModel) -> None:
+    assert isinstance(validate(sql, model), ValidRequest), f"refused a supported ordering: {sql}"

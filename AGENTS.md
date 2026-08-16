@@ -58,10 +58,13 @@ This is a rule, not a guarantee: `Adapter.execute` takes a plain string and noth
 calling it directly. Treat it as load-bearing convention until a validated-SQL type exists.
 
 Also refused, for the same reason: any construct the compiler cannot honour — `HAVING`,
-`ORDER BY`, `LIMIT`, `DISTINCT`, CTEs, subqueries, joins, `TABLESAMPLE`, `PIVOT`. `WHERE` is
-supported as of spec 004, but only over **dimensions**, compared to **literals** whose type
-matches the dimension's declared `type`; the predicate is rebuilt from the model rather than
-carried over, and filtering a measure is refused as needing `HAVING`.
+`DISTINCT`, CTEs, subqueries, joins, `TABLESAMPLE`, `PIVOT`.
+
+What *is* supported, and how tightly: `WHERE` over **dimensions** compared to **literals**
+whose type matches the dimension's declared `type`, with the predicate rebuilt from the model
+rather than carried over (spec 004); and `ORDER BY` over names the request **selects**, plus
+`LIMIT`/`OFFSET` as non-negative whole numbers (spec 005). Filtering a measure is refused as
+needing `HAVING`; ordering by a position or an unselected name is refused too.
 
 The reason refusal is the default: `compile_request` rebuilds the query from the model, so an
 unvalidated construct would *vanish* and the caller would get a wrong number.

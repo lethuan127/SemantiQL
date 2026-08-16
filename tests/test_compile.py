@@ -55,30 +55,26 @@ def test_dimension_drives_group_by(model: SemanticModel) -> None:
     assert "CHANNEL" in sql
 
 
-def test_transpiling_is_currently_a_no_op_for_everything_we_emit(model: SemanticModel) -> None:
-    """A tripwire, and an honest record of a limitation.
+def test_transpiling_actually_changes_the_sql(model: SemanticModel) -> None:
+    """Constitution N4, finally testable — this replaces the tripwire that asked for it.
 
-    The SQL this engine emits today — aliased columns, one aggregate, a GROUP BY — is
-    spelled identically in every dialect sqlglot knows. So the transpile step is wired but
-    *unexercised*: deleting `sqlglot.transpile` from `compile_request` would not change any
-    output, and no test could catch it. The previous test here pretended otherwise by
-    asserting on `COUNT(...)` and `GROUP BY`, which are dialect-invariant.
+    Until `LIMIT` arrived (spec 005), everything this engine emitted was spelled identically
+    in every dialect sqlglot knows, so deleting `sqlglot.transpile` from `compile_request`
+    would have changed no output and no test could have caught it. The tripwire that stood
+    here recorded that honestly and instructed its own replacement once a construct rendered
+    differently.
 
-    This test asserts the true state instead. **It is meant to fail** the moment the engine
-    starts emitting something dialect-specific (a date truncation, a string function, a
-    LIMIT). When it does, replace it with a real assertion that the target rendering
-    differs — that is the point at which constitution N4's transpiling claim becomes
-    testable.
+    `LIMIT` is that construct: T-SQL has no `LIMIT` clause and spells the same request `SELECT
+    TOP 2`. One canonical statement, two renderings, no dialect branching in the compiler.
     """
-    request = _valid("SELECT revenue, order_date FROM orders", model)
-    rendered = {
-        d: compile_request(request, model, relation=ORDERS, dialect=d)
-        for d in ("duckdb", "postgres", "tsql", "spark", "mysql", "bigquery", "snowflake")
-    }
-    assert len(set(rendered.values())) == 1, (
-        "a dialect now renders differently — good. Replace this tripwire with a real "
-        f"transpile assertion: {rendered}"
-    )
+    request = _valid("SELECT revenue, channel FROM orders ORDER BY revenue DESC LIMIT 2", model)
+    duckdb = compile_request(request, model, relation=ORDERS, dialect="duckdb")
+    tsql = compile_request(request, model, relation=ORDERS, dialect="tsql")
+
+    assert "LIMIT 2" in duckdb, duckdb
+    assert "TOP 2" in tsql, tsql
+    assert "LIMIT" not in tsql, tsql
+    assert duckdb != tsql
 
 
 def test_count_distinct_is_rendered_distinctly() -> None:
@@ -211,3 +207,29 @@ def test_an_unescaped_quote_is_refused_rather_than_executed(model: SemanticModel
     """
     outcome = validate("SELECT revenue FROM orders WHERE channel = 'web' OR 1=1 --", model)
     assert isinstance(outcome, Refusal), outcome
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT revenue, channel FROM orders ORDER BY revenue DESC", "ORDER BY revenue DESC"),
+        ("SELECT revenue AS total, channel FROM orders ORDER BY revenue", "ORDER BY total"),
+        ("SELECT revenue, channel FROM orders ORDER BY revenue NULLS FIRST", "NULLS FIRST"),
+        ("SELECT revenue FROM orders LIMIT 5", "LIMIT 5"),
+        ("SELECT revenue FROM orders LIMIT 5 OFFSET 2", "OFFSET 2"),
+    ],
+)
+def test_ordering_and_limits_render(sql: str, expected: str, model: SemanticModel) -> None:
+    compiled = compile_request(_valid(sql, model), model, relation=ORDERS, dialect="duckdb")
+    assert expected in compiled, compiled
+
+
+def test_ordering_names_the_output_column_not_the_aggregate(model: SemanticModel) -> None:
+    """`ORDER BY revenue` on a request that aliased it must order by the alias the caller sees."""
+    compiled = compile_request(
+        _valid("SELECT revenue AS total, channel FROM orders ORDER BY revenue DESC", model),
+        model,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    assert "ORDER BY total DESC" in compiled, compiled

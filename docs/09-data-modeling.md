@@ -360,8 +360,13 @@ Not expressible in the model today:
 - **Synonyms or aliases for entities**, formatting hints, units, or currency.
 - **Row-level security, masking, or access control.** That is layer 3, deliberately
   unimplemented ([07-code-map.md](07-code-map.md)).
-- **Ordering and limits.** `ORDER BY` and `LIMIT` are refused, so a "top 5 channels" answer
-  is the caller's job after the fact.
+- **Ordering by something unselected.** `ORDER BY` works (A.2), but only over names the
+  request projects — SQL would allow ordering by a measure that never appears in the answer,
+  and this engine refuses it so a reader can always see why the rows are in that order.
+
+  On nulls: `NULLS FIRST` is honoured where written. Where it is not, placement follows the
+  target engine's default, which is `NULLS LAST` for ascending order on both MVP engines —
+  so an explicit `NULLS LAST` and no clause at all behave the same.
 
 The workaround for most of these is the same: **push it into the database and point `source`
 at a view.** A view can filter, join, derive, and truncate; the model then exposes the result
@@ -542,8 +547,8 @@ warnings: a dropped `WHERE` returns a grand total that looks exactly like a filt
 | `WHERE` over a measure | ❌ | that is `HAVING` — refused, and the refusal says so |
 | `GROUP BY` | ❌ | implicit: selecting a dimension groups by it |
 | `HAVING` | ❌ | filter the returned rows in the caller |
-| `ORDER BY` | ❌ | sort the returned rows in the caller |
-| `LIMIT` / `OFFSET` | ❌ | slice the returned rows in the caller |
+| `ORDER BY` | ✅ | over names the request **selects** (entity or alias), `ASC`/`DESC`, several keys. A position (`ORDER BY 1`), an aggregate, or an unselected name is refused |
+| `LIMIT` / `OFFSET` | ✅ | a non-negative whole number written directly. `LIMIT 1 + 1`, `LIMIT -1` and `LIMIT '5'` are refused |
 | `DISTINCT` (statement-level) | ❌ | use a `count_distinct` measure for distinct counting |
 | `QUALIFY`, `WINDOW`, `OVER` | ❌ | not available |
 | `WITH` (CTE) | ❌ | a database view |

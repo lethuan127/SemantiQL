@@ -96,3 +96,34 @@ def test_a_filter_does_not_add_a_grouping(model: SemanticModel, adapter: DuckDBA
     result = _result("SELECT revenue FROM orders WHERE channel = 'web'", model, adapter)
     assert result.columns == ["revenue"]
     assert len(result.rows) == 1
+
+
+def test_ordering_ranks_the_answer(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    """Revenue by channel, ranked: web 956.50 > partner 385.25 > retail 344.49."""
+    result = _result("SELECT revenue, channel FROM orders ORDER BY revenue DESC", model, adapter)
+    channel = result.columns.index("channel")
+    assert [row[channel] for row in result.rows] == ["web", "partner", "retail"]
+
+
+def test_ascending_is_the_reverse_ranking(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    """A dropped DESC would look like a plausible answer, so assert the opposite order too."""
+    result = _result("SELECT revenue, channel FROM orders ORDER BY revenue", model, adapter)
+    channel = result.columns.index("channel")
+    assert [row[channel] for row in result.rows] == ["retail", "partner", "web"]
+
+
+def test_limit_bounds_the_answer(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    result = _result(
+        "SELECT revenue, channel FROM orders ORDER BY revenue DESC LIMIT 1", model, adapter
+    )
+    assert len(result.rows) == 1
+    assert result.rows[0][result.columns.index("channel")] == "web"
+
+
+def test_offset_skips_the_top(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    result = _result(
+        "SELECT revenue, channel FROM orders ORDER BY revenue DESC LIMIT 1 OFFSET 1",
+        model,
+        adapter,
+    )
+    assert result.rows[0][result.columns.index("channel")] == "partner"

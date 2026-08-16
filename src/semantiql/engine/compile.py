@@ -141,6 +141,23 @@ def compile_request(
     for name in request.dimensions:
         select = select.group_by(exp.column(table.dimensions[name].column))
 
+    # Ordering names the *output* column — `ORDER BY revenue`, the word the caller used —
+    # rather than repeating `SUM(amount)`. Both MVP engines accept it, and the emitted SQL
+    # still reads like the request that produced it.
+    for key in request.order:
+        select = select.order_by(
+            exp.Ordered(
+                this=exp.column(key.output),
+                desc=key.desc,
+                nulls_first=key.nulls_first,
+            )
+        )
+
+    if request.limit is not None:
+        select = select.limit(request.limit)
+    if request.offset is not None:
+        select = select.offset(request.offset)
+
     canonical = select.sql(dialect=CANONICAL_DIALECT)
     if dialect == CANONICAL_DIALECT:
         return canonical

@@ -1,6 +1,11 @@
 # Update Log
 
 ## 2026-08-16
+* **Update**: Shipped 005 — 6 of 6 tasks; ORDER BY over projected names, LIMIT/OFFSET as whole numbers, 25 new test cases, verify gate green at 157 tests. The transpile tripwire was replaced by a real T-SQL-vs-DuckDB assertion, as its own docstring instructed — N4 is now verified for behaviour, not only for imports [005](/005-order-and-limit/spec.md)
+* **Update**: Task list drafted — 6 tasks, one [P] pair for the derived copies [005](/005-order-and-limit/tasks.md)
+* **Creation**: Plan and impact map drafted — extend `_SELECT_ARGS` to order/limit/offset, order by the output alias, and replace the transpile tripwire with a real T-SQL-vs-DuckDB assertion. 7 files to modify, 0 to add [005](/005-order-and-limit/plan.md)
+* **Update**: Clarified 4 ambiguities — order only by projected names; honour `nulls_first` as recorded; LIMIT/OFFSET are whole-number literals; `LIMIT ALL` passes through as "no limit" because that is what it means [005](/005-order-and-limit/clarifications.md)
+* **Creation**: Spec drafted for ordering and limits — ORDER BY restricted to projected names, LIMIT/OFFSET as non-negative integer literals, and FR-8 converts the transpile tripwire into a real assertion now that LIMIT renders as TOP on T-SQL [005](/005-order-and-limit/spec.md)
 * **Update**: Shipped 004 — 8 of 8 tasks; `WHERE` over dimensions with typed literals, predicate rebuilt from a neutral IR, 42 new test cases, verify gate green at 132 tests. Two pre-existing tests asserting `WHERE` is refused were rewritten to the new contract, disclosed as an amendment [004](/004-filter-by-dimension/spec.md)
 * **Update**: Task list drafted — 8 tasks, one [P] pair for the derived copies [004](/004-filter-by-dimension/tasks.md)
 * **Creation**: Plan and impact map drafted — validate the WHERE into a neutral predicate IR, rebuild it in the compiler from the model. AST probe found `NOT LIKE` is `Like(negate=True)`, a scalar flag whose loss would invert a filter silently. 7 files to modify, 0 to add [004](/004-filter-by-dimension/plan.md)

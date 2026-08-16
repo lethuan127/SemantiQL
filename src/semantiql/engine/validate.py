@@ -9,16 +9,18 @@ silently dropped, not passed to the database to see what happens. That covers tw
 thing:
 
 1. Identifiers that do not resolve in the semantic model.
-2. Every construct the compiler does not implement — `WHERE`, `HAVING`, `ORDER BY`, `LIMIT`,
-   `DISTINCT`, CTEs, subqueries, joins, `TABLESAMPLE`, `PIVOT`, and anything else SQL can
-   express.
+2. Every construct the compiler does not implement — `HAVING`, `DISTINCT`, CTEs, subqueries,
+   joins, `TABLESAMPLE`, `PIVOT`, and anything else SQL can express. `WHERE` (spec 004) and
+   `ORDER BY` / `LIMIT` / `OFFSET` (spec 005) are implemented, each restricted to what the
+   compiler can rebuild faithfully.
 
 The second is the one that bites. `compile_request` rebuilds a query from the model rather
 than rewriting the user's AST, so any construct left unvalidated would simply *vanish* and
 the caller would get a confidently wrong number — `SELECT revenue FROM orders WHERE channel =
-'web'` answering with total revenue. A wrong number nobody can detect is precisely the
-failure this project exists to prevent, so an unsupported construct is a refusal, and it
-stays one until the compiler genuinely implements it.
+'web'` answering with total revenue, or a dropped `LIMIT 5` answering with forty rows. A
+wrong number nobody can detect is precisely the failure this project exists to prevent, so an
+unsupported construct is a refusal, and it stays one until the compiler genuinely implements
+it.
 
 **So the check is an allowlist, and that shape is load-bearing.** It used to be the
 inverse — a list of known-bad clause names checked against the parsed statement — and that
@@ -56,7 +58,12 @@ from semantiql.knowledge.model import Dimension, SemanticModel, Table
 #: is a construct that would be dropped. Adding an entry here without teaching the compiler to
 #: honour it reopens the silent-drop hole this allowlist closes — `where` is here because
 #: spec 004 taught the compiler to build a predicate, not to make room for one.
-_SELECT_ARGS: frozenset[str] = frozenset({"expressions", "from", "where"})
+_SELECT_ARGS: frozenset[str] = frozenset(
+    {"expressions", "from", "where", "order", "limit", "offset"}
+)
+
+#: The arguments an ORDER BY key may carry. `with_fill` (ClickHouse) is absent, so it refuses.
+_ORDERED_ARGS: frozenset[str] = frozenset({"this", "desc", "nulls_first"})
 
 #: What a `FROM <one model table>` may contain: each allowed node type, and the arguments
 #: that node type may carry. `Table` holds its name parts as `Identifier`s plus an optional
@@ -227,6 +234,21 @@ Predicate = Comparison | BoolOp | Negation
 
 
 @dataclass(frozen=True)
+class OrderKey:
+    """One `ORDER BY` key, named as the result column the caller will see.
+
+    `nulls_first` is carried rather than dropped: sqlglot records it as `True` only where the
+    request wrote `NULLS FIRST`, so passing it through reproduces the request, and the
+    unwritten case is left to the engine's default — which is what `NULLS LAST` asks for on
+    both MVP engines anyway.
+    """
+
+    output: str
+    desc: bool = False
+    nulls_first: bool = False
+
+
+@dataclass(frozen=True)
 class ValidRequest:
     """A request proven to resolve against the model, ready to compile.
 
@@ -241,6 +263,9 @@ class ValidRequest:
     measures: tuple[str, ...]
     dimensions: tuple[str, ...]
     filter: Predicate | None = None
+    order: tuple[OrderKey, ...] = ()
+    limit: int | None = None
+    offset: int | None = None
 
 
 class SemanticSyntaxError(Exception):
@@ -416,6 +441,70 @@ def _suggest(name: str, candidates: list[str]) -> list[str]:
     return [folded[h] for h in hits]
 
 
+def _ordering(order: exp.Order, projections: list[Projection]) -> tuple[OrderKey, ...] | Refusal:
+    """Resolve `ORDER BY` against what the request selects.
+
+    Ordering by something the request does not project is refused, even though SQL allows it:
+    a number that decides the order of the rows without appearing in them leaves a reader
+    unable to see why the answer is arranged as it is. That rule also disposes of ordinals and
+    aggregates without needing a case for either — neither is a name the request selects.
+    """
+    #: Both spellings resolve to the column the caller will see: `revenue AS total` can be
+    #: ordered by either `revenue` or `total`.
+    outputs = {p.output: p.output for p in projections} | {p.entity: p.output for p in projections}
+
+    keys: list[OrderKey] = []
+    for item in order.expressions:
+        if not isinstance(item, exp.Ordered):
+            return _unsupported(f"{_predicate_label(item)} in ORDER BY")
+        for arg, value in item.args.items():
+            if value and arg not in _ORDERED_ARGS:
+                label = _CLAUSE_LABELS.get(_bare(arg), _bare(arg).upper())
+                return _unsupported(f"{label} in ORDER BY")
+
+        target = item.this
+        if isinstance(target, exp.Literal):
+            return Refusal(
+                "ORDER BY takes the name of something this request selects, not a position. "
+                f"Order by one of: {', '.join(sorted(set(outputs.values())))}."
+            )
+        if not isinstance(target, exp.Column):
+            return Refusal(
+                f"ORDER BY takes the name of something this request selects, and "
+                f"{_predicate_label(target)} is not one."
+            )
+        if target.name not in outputs:
+            return Refusal(
+                f"{target.name!r} is not selected by this request, so it cannot decide the "
+                "order of rows that do not show it.",
+                _suggest(target.name, sorted(set(outputs))),
+            )
+        keys.append(
+            OrderKey(
+                output=outputs[target.name],
+                desc=bool(item.args.get("desc")),
+                nulls_first=bool(item.args.get("nulls_first")),
+            )
+        )
+    return tuple(keys)
+
+
+def _row_count(node: exp.Expr, label: str) -> int | Refusal:
+    """The whole number behind a `LIMIT` or an `OFFSET`.
+
+    Anything else — `LIMIT 1 + 1`, `LIMIT -1`, a quoted value — is refused rather than
+    rebuilt: honouring an expression here would smuggle expression support into the compiler
+    through a clause, and the model deliberately has none.
+    """
+    value = node.args.get("expression")
+    if not isinstance(value, exp.Literal) or value.args.get("is_string"):
+        return Refusal(f"{label} takes a whole number written directly, and this is not one.")
+    text = str(value.this)
+    if not text.isdigit():
+        return Refusal(f"{label} takes a non-negative whole number, and {text!r} is not one.")
+    return int(text)
+
+
 def validate(sql: str, model: SemanticModel) -> ValidRequest | Refusal:
     """Check `sql` against `model`. Returns a `ValidRequest` or a `Refusal` — never a guess."""
     try:
@@ -511,10 +600,31 @@ def validate(sql: str, model: SemanticModel) -> ValidRequest | Refusal:
             return resolved
         predicate = resolved
 
+    order_node = parsed.args.get("order")
+    keys: tuple[OrderKey, ...] = ()
+    if order_node is not None:
+        ordering = _ordering(order_node, projections)
+        if isinstance(ordering, Refusal):
+            return ordering
+        keys = ordering
+
+    counts: dict[str, int | None] = {"limit": None, "offset": None}
+    for arg, label in (("limit", "LIMIT"), ("offset", "OFFSET")):
+        clause: exp.Expr | None = parsed.args.get(arg)
+        if clause is None:
+            continue
+        count = _row_count(clause, label)
+        if isinstance(count, Refusal):
+            return count
+        counts[arg] = count
+
     return ValidRequest(
         table=table_name,
         projections=tuple(projections),
         measures=tuple(measures),
         dimensions=tuple(dimensions),
         filter=predicate,
+        order=keys,
+        limit=counts["limit"],
+        offset=counts["offset"],
     )

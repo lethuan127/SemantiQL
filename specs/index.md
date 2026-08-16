@@ -16,4 +16,5 @@ bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md)
 * [001-init-project-scaffold/](001-init-project-scaffold/) - T2, shipped (FR-9 blocked), checkpoint 1 human-approved - initialize the repo: dev environment, verify gate, one runnable end-to-end example, and the artifacts a stranger needs to contribute
 * [003-refuse-unimplemented-constructs/](003-refuse-unimplemented-constructs/) - T2, shipped - close the silent-drop gap — TABLESAMPLE and PIVOT are accepted and dropped today; make refusal the default for anything unimplemented
 * [004-filter-by-dimension/](004-filter-by-dimension/) - T2, shipped - support WHERE over model dimensions with typed literals, rebuilt from the model
+* [005-order-and-limit/](005-order-and-limit/) - T2, shipped - ORDER BY over projected names plus LIMIT/OFFSET, and the first real transpile assertion
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above
