@@ -30,7 +30,7 @@ verified:
   - { by: claude-code/claude-opus-5, at: '2026-08-17T00:57:34+07:00', checkpoint: 1,
       basis: '9 FRs, each testable. Scope derived from a measured divergence rather than a suspicion — spec 010 ran both engines and recorded the result. FR-3 exists because the self-audit found the differential suite compares one grain of five, so this spec does not inherit an unearned assumption about the other four' }
 status: draft
-sdd_phase: drafting
+sdd_phase: tasking
 sdd_tier: T2
 ---
 
@@ -61,6 +61,18 @@ a timezone-aware value. DuckDB returns a naive one. **The SQL sent to both engin
 byte identical** — sqlglot is not involved, so this is not a transpile bug and cannot be fixed
 by one.
 
+**Amended after clarify measured it: this is not a divergence, and that is worse.** The framing
+above describes the *return type*, which is the visible symptom. On the thing that matters —
+which bucket a row lands in — **both engines behave identically, and both are wrong the same
+way**. One row at `2026-07-01T02:00:00+00` in a timezone-carrying column buckets into July on a
+server set to UTC and into June on a server set to `America/Chicago`, **on DuckDB as much as on
+Postgres**.[^clarifications]
+
+That reframes the whole change. The problem is not that one engine disagrees; it is that a grain
+is computed in a timezone nobody declared, on every engine SemantiQL supports. And it means the
+strongest control this repo owns is blind to it: a differential suite asks whether two engines
+agree, and here they do.
+
 **The harmless case, and why it is not the real problem.** With a `date` column, every value is
 midnight, so truncating to month lands on the 1st either way. Buckets and totals match. Only the
 rendering carries a spurious offset. That is what ships today, pinned by a test.
@@ -80,10 +92,12 @@ removed the first assumption; `timestamptz` was always able to remove the second
 
 **A gap in what spec 010 actually verified, stated plainly.** The differential suite compares
 `month` and no other grain. `_GRAINS` allows five — `year`, `quarter`, `month`, `week`,
-`day`.[^validate] `week` is the one to worry about next: it carries a start-of-week convention
-that engines are entitled to disagree about, and nothing in this repo has ever compared it. So
-"the two engines agree on grains" is currently evidence about one grain out of five, and this
-spec should not assume the other four are fine.
+`day`.[^validate] So "the two engines agree on grains" was evidence about one grain out of five.
+
+Clarify measured the other four: **all five agree**, `week` included — both engines start it on
+Monday. So FR-3 is a coverage task rather than a bug hunt, and the suspicion recorded here
+before measuring (that `week` was the one to doubt) was wrong.[^clarifications] It stays written
+down because the gap in coverage was real even though the bug behind it was not.
 
 # User stories
 
@@ -103,7 +117,13 @@ spec should not assume the other four are fine.
   every engine and every server configuration, or the request is refused.
 - **FR-2** — Where a grain cannot be made configuration-independent, the request is **refused
   with a message naming the timezone as the cause** and what to change. Never computed and
-  labelled.
+  labelled. **Narrowed during planning** to: for any model that `semantiql doctor` passes. A
+  model that misdescribes its own columns — declaring `type: date` over a timezone-carrying
+  column with no timezone stated — is caught by `doctor` rather than refused at query time,
+  because `validate` runs before the adapter by design and cannot see the physical type. The
+  cost of closing that last gap is a database round-trip inside `run`, which is a larger change
+  than this spec; the trade-off is argued in the plan's AD-5 and is the decision most worth
+  overruling.[^clarifications]
 - **FR-3** — Every grain in `_GRAINS` — `year`, `quarter`, `month`, `week`, `day` — is compared
   across DuckDB and Postgres by the differential suite, not just `month`.
 - **FR-4** — Truncating a column that carries a timezone is either handled explicitly or
@@ -143,6 +163,7 @@ spec should not assume the other four are fine.
 - **Filtering on a truncated value**, still deferred from spec 007.
 - **Converting stored data.** SemantiQL reads; migrating a column's type is the operator's call.
 
+[^clarifications]: `clarifications.md` — 8 ambiguities resolved before planning; Q1, Q2, Q3 and Q7 were settled by running both engines.
 [^constitution]: `.specify/memory/constitution.md` — N2, N3, N4.
 [^spec-007]: `specs/007-time-grains/spec.md` — the Out of scope section deferring time zones.
 [^spec-010-validation]: `specs/010-postgres-adapter/validation.md` — finding 1 under "Findings carried forward".
