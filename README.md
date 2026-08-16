@@ -12,7 +12,8 @@ triaged weekly, with no SLA. Open an issue before writing a large pull request.
 
 The engine below runs today: a semantic model with dimensions, measures and metrics;
 validation; filters, ordering, limits and time grains; sqlglot transpiling; `semantiql doctor`
-to check a model against its database; and a DuckDB example. The MCP server, Postgres, and the
+to check a model against its database; and **DuckDB and Postgres** adapters, with a differential
+test suite asserting both return the same answer for the same model. The MCP server and the
 accuracy benchmark are not built yet — see the [roadmap](#roadmap).
 
 ## Quickstart
@@ -48,6 +49,25 @@ refused: 'profit' is not defined on table 'orders'.
 
 That refusal is the point of the project, not a limitation. Run `./scripts/verify.sh` to
 check everything the CI checks.
+
+### Against Postgres
+
+The same model, the same question, a different engine:
+
+```bash
+uv run semantiql "SELECT revenue, channel FROM orders" \
+  -m examples/retail/semantic_model.postgres.yml \
+  --datasource postgres --dsn postgresql://user@localhost/yourdb
+```
+
+Omit `--dsn` to use libpq's own environment (`PGHOST`, `PGUSER`, `.pgpass`), which keeps a
+password out of your shell history. The connection never appears in the model file.
+
+The two models differ on exactly two lines — `dialect`, and `source: orders` in place of
+`source: orders.csv`, because Postgres has no file sources. Everything that defines what a
+number *means* is identical, and
+[`tests/test_postgres_differential.py`](tests/test_postgres_differential.py) fails if the two
+engines ever disagree about one.
 
 Check a model against its database before trusting it:
 
@@ -102,7 +122,7 @@ LLMs answering questions over raw SQL schemas are wrong most of the time (~16% a
 
 | Stage | Scope |
 |---|---|
-| MVP | DuckDB + Postgres · semantic model YAML · semantic SQL → raw SQL engine · MCP server for Claude · accuracy benchmark vs. raw-table querying |
+| MVP | ✅ DuckDB + Postgres · ✅ semantic model YAML · ✅ semantic SQL → raw SQL engine · MCP server for Claude · accuracy benchmark vs. raw-table querying |
 | Next | MySQL, SQLite · verified-examples loop |
 | Later | BigQuery, Snowflake, Databricks · remote server mode · access control |
 

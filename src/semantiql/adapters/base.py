@@ -81,3 +81,16 @@ class Adapter(Protocol):
     def execute(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
         """Run already-validated, already-transpiled SQL. Returns (column names, rows)."""
         ...
+
+    def close(self) -> None:
+        """Release whatever the adapter holds open. An adapter holding nothing no-ops.
+
+        This arrived late, and how it arrived is the point (spec 010). The CLI has always
+        called `close()` in a `finally`, and both adapters have always defined it — but the
+        Protocol did not declare it, and nothing noticed, because the CLI was typed against
+        `DuckDBAdapter` rather than against this. An outside adapter written to the published
+        Protocol would have passed `isinstance`, passed mypy, and then crashed on the way out.
+
+        One implementation cannot tell you a seam is incomplete. The second one can.
+        """
+        ...

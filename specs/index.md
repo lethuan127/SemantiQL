@@ -21,4 +21,5 @@ bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md)
 * [007-time-grains/](007-time-grains/) - T2, shipped - DATE_TRUNC over date dimensions, with the year-collapsing forms refused
 * [008-e2e-suite/](008-e2e-suite/) - T2, shipped (checkpoint 3 skipped) - an end-to-end suite over a locally generated TPC-H corpus, checked against hand-written SQL
 * [009-doctor/](009-doctor/) - T2, shipped - a health check that finds where the model and the real schema disagree
+* [010-postgres-adapter/](010-postgres-adapter/) - T2, shipped - a Postgres adapter that proves N4 with a second engine, and the differential suite that shows the same model answers the same on both
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above

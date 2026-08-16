@@ -1,6 +1,15 @@
 # The semantic model is the source of truth (constitution N3): reviewable, diffable,
-# and independent of which database executes it. Swapping `datasource.dialect` to
-# postgres changes nothing else in this file.
+# and independent of which database executes it.
+#
+# This comment used to claim that swapping `datasource.dialect` to postgres "changes
+# nothing else in this file". Building the Postgres adapter proved that too strong, so
+# here is the accurate version: everything that defines what a number *means* — every
+# dimension, measure and metric below — moves between engines untouched. The `source`
+# does not, when it names a file: Postgres has no equivalent of read_csv_auto, so a CSV
+# path has to become a table first.
+#
+# See `semantic_model.postgres.yml` for the same model against Postgres. Exactly two
+# lines differ.
 version: 1
 
 datasource:

@@ -36,6 +36,13 @@ class ExplodingAdapter:
     def execute(self, sql: str) -> tuple[list[str], list[tuple[object, ...]]]:  # pragma: no cover
         raise AssertionError(f"a refused request reached the database: {sql!r}")
 
+    def close(self) -> None:
+        """Nothing is held open, so this no-ops — and it must not explode.
+
+        Unlike the three above, closing is not evidence that a refused request reached the
+        data: the CLI closes in a `finally`, so a *correctly* refused request still closes.
+        """
+
 
 def test_unknown_measure_is_refused_and_never_executed(model: SemanticModel) -> None:
     outcome = run("SELECT profit FROM orders", model, ExplodingAdapter())

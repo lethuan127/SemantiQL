@@ -9,14 +9,17 @@ from __future__ import annotations
 import argparse
 import sys
 
-from semantiql.adapters.base import AdapterError
+from semantiql.adapters.base import Adapter, AdapterError
 from semantiql.adapters.duckdb import DuckDBAdapter
+from semantiql.adapters.postgres import PostgresAdapter
 from semantiql.doctor import Finding, check, problems
 from semantiql.engine.run import Result, run
 from semantiql.engine.validate import Refusal
 from semantiql.knowledge.loader import ModelError, load_model
 
 EXAMPLE_MODEL = "examples/retail/semantic_model.yml"
+
+DEFAULT_DUCKDB = ":memory:"
 
 #: Verbs the docs and roadmap promise but that are not built yet. Without this, `semantiql
 #: init` is parsed as SQL and answered with "Only SELECT is supported, and this is COLUMN"
@@ -52,7 +55,25 @@ def _render_findings(findings: list[Finding]) -> str:
     return "\n".join(lines)
 
 
-def _doctor(model_path: str, database: str) -> int:
+def _open_adapter(args: argparse.Namespace) -> Adapter:
+    """The one place a concrete adapter is chosen.
+
+    Both entry points below come through here, so a third datasource is one branch rather than
+    a second construction site that can drift from the first. It opens a connection and nothing
+    else — every path to the *data* still goes through `engine.run.run` (N1).
+
+    The adapter is named explicitly rather than inferred from `model.datasource.dialect`, and
+    that is deliberate: `run` refuses when the model's dialect and the adapter's disagree, and
+    inferring one from the other would make that refusal unreachable. Under inference, "this
+    model was written for DuckDB but I meant to query Postgres" silently opens DuckDB; here it
+    is a loud refusal (spec 010, clarification Q3).
+    """
+    if args.datasource == "postgres":
+        return PostgresAdapter(args.dsn or "")
+    return DuckDBAdapter(args.database or DEFAULT_DUCKDB)
+
+
+def _doctor(model_path: str, args: argparse.Namespace) -> int:
     """Report where the model and the database disagree. Never edits either."""
     try:
         model = load_model(model_path)
@@ -61,7 +82,7 @@ def _doctor(model_path: str, database: str) -> int:
         return 2
 
     try:
-        adapter = DuckDBAdapter(database)
+        adapter = _open_adapter(args)
     except AdapterError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
@@ -104,13 +125,34 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--show-sql", action="store_true", help="print the generated physical SQL")
     parser.add_argument(
+        "--datasource",
+        choices=["duckdb", "postgres"],
+        default="duckdb",
+        help="which datasource to open (default: duckdb)",
+    )
+    parser.add_argument(
         "--database",
-        default=":memory:",
-        help="DuckDB database file to query (default: in-memory, which reads CSV and Parquet "
-        "sources directly)",
+        default=None,
+        help=f"DuckDB database file to query (default: {DEFAULT_DUCKDB}, which reads CSV and "
+        "Parquet sources directly). DuckDB only",
+    )
+    parser.add_argument(
+        "--dsn",
+        default=None,
+        help="Postgres connection string, e.g. postgresql://user@host/db. Postgres only; "
+        "omit it to use libpq's environment (PGHOST, PGUSER, .pgpass), which keeps a password "
+        "out of your shell history",
     )
     # Exit codes: 0 ok · 1 refused (the request is not answerable) · 2 bad model · 3 datasource
     args = parser.parse_args(argv)
+
+    # A flag meant for the other engine is an error rather than a silent no-op: quietly
+    # ignoring `--dsn` would connect to DuckDB while the user believed they had reached
+    # Postgres, and the answer would look fine.
+    if args.datasource == "postgres" and args.database is not None:
+        parser.error("--database is DuckDB-only; use --dsn with --datasource postgres")
+    if args.datasource == "duckdb" and args.dsn is not None:
+        parser.error("--dsn is Postgres-only; use --database with --datasource duckdb")
 
     if not args.sql:
         parser.print_help()
@@ -118,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
 
     verb = args.sql.strip().lower()
     if verb == "doctor":
-        return _doctor(args.model, args.database)
+        return _doctor(args.model, args)
 
     if verb in NOT_YET_IMPLEMENTED:
         print(
@@ -136,7 +178,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    adapter = DuckDBAdapter(args.database)
+    try:
+        adapter = _open_adapter(args)
+    except AdapterError as exc:
+        # Opening the datasource is a separate failure from querying it, and it is the one a
+        # first-time user hits — so it gets the same exit code and its own message.
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
     try:
         outcome = run(args.sql, model, adapter)
     except AdapterError as exc:

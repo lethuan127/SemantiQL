@@ -99,8 +99,25 @@ grep -rnE "adapters(\.|[[:space:]]+import)" src/semantiql/engine/   # only adapt
 ```
 
 That catches imports only. DuckDB is also the hard-coded canonical dialect in
-`compile.py` and the parse dialect in `validate.py` — deliberate, but it means the claim is
-verified for imports, not for behaviour. See [docs/07-code-map.md](docs/07-code-map.md).
+`compile.py` and the parse dialect in `validate.py` — deliberate, and unchanged by the second
+adapter. See [docs/07-code-map.md](docs/07-code-map.md).
+
+**N4 has now been tested rather than assumed** (spec 010). Adding Postgres changed **zero files
+under `engine/`**, and `tests/test_postgres_differential.py` asserts both engines answer the
+same model identically. Two things that only a second adapter could reveal:
+
+- **The seam was incomplete.** `close()` was called by the CLI and implemented by both adapters
+  but never declared on the `Adapter` Protocol. It went unnoticed because the CLI was typed
+  against `DuckDBAdapter`; an outside adapter written to the published Protocol would have
+  passed `isinstance`, passed mypy, then crashed on exit. Adding it was part of 010.
+- **`DATE_TRUNC` diverges on identical SQL.** Postgres resolves `date_trunc(text, date)` to its
+  `timestamptz` overload, so the result carries the server's timezone where DuckDB's does not.
+  Buckets and totals agree today, so it is pinned by a test rather than fixed — fixing it means
+  changing `compile.py`, which needs its own spec.
+
+So the shape of N4 holds. Read "no core changes" as a claim about `engine/`, not as a promise
+that the adapter seam is already complete — a gap in the seam is a finding, and finding one is
+not a reason to touch `engine/`.
 
 **N5 — Read-only by default.** Nothing in the query path needs write access. Precisely: a
 file-backed DuckDB connection is opened `read_only=True`, but DuckDB *cannot* open an
@@ -185,9 +202,9 @@ Documentation-only work and mechanical fixes are deliberately outside that lifec
 
 ## Not yet built
 
-So you don't propose these as bugs: the MCP server, the Postgres adapter, schema
-introspection (`semantiql init`), the accuracy benchmark, the self-improvement loop, and the
-Data Governance layer (layer 3 — named in the code map, deliberately unimplemented).
+So you don't propose these as bugs: the MCP server, schema introspection (`semantiql init`),
+the accuracy benchmark, the self-improvement loop, and the Data Governance layer (layer 3 —
+named in the code map, deliberately unimplemented).
 
 Two decisions are open and should be flagged rather than silently resolved: auth for a
 shared multi-user server, and Open Semantic Interchange compatibility for the model YAML.

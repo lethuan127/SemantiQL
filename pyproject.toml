@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Thuan Le" }]
-keywords = ["semantic-layer", "sql", "duckdb", "llm", "mcp"]
+keywords = ["semantic-layer", "sql", "duckdb", "postgres", "llm", "mcp"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Intended Audience :: Developers",
@@ -18,6 +18,9 @@ classifiers = [
 dependencies = [
   "sqlglot>=30,<31",
   "duckdb>=1.0",
+  # The `binary` extra ships prebuilt wheels, so no libpq build step stands between a clone
+  # and a working install — which is what the ≤15-minute setup rule needs (spec 010).
+  "psycopg[binary]>=3.1",
   "pydantic>=2.6",
   "pyyaml>=6",
 ]
@@ -71,4 +74,9 @@ addopts = "-q"
 # hand-written SQL (specs/008-e2e-suite/). It runs by default because it costs a fraction of
 # a second at the default scale, and a suite that only runs when someone remembers rots.
 # Iterating? `-m "not e2e"`. Soak run? `SEMANTIQL_E2E_SF=1`.
-markers = ["e2e: end-to-end tests over a generated corpus"]
+markers = [
+  "e2e: end-to-end tests over a generated corpus",
+  # The Postgres suite needs a database this repo cannot bundle. Absent one it skips with a
+  # stated reason rather than failing, so a fresh clone still passes the gate (spec 010).
+  "pg: tests that need a live Postgres, reached via SEMANTIQL_TEST_DSN",
+]

@@ -16,6 +16,7 @@ src/semantiql/
   adapters/      4. Database
     base.py        the Adapter Protocol — the seam a new datasource plugs into
     duckdb.py      DuckDB; reads CSV and Parquet directly
+    postgres.py    Postgres; tables and views only, read-only connection
   doctor.py      checks a model against the database — `semantiql doctor`
   cli.py         the `semantiql` command
 ```
@@ -71,8 +72,22 @@ grep -rnE "adapters(\.|[[:space:]]+import)" src/semantiql/engine/   # only adapt
 The grep is necessary but not sufficient. Three DuckDB-specific things do live in `engine/`
 and no import check will find them: `validate.py` parses input with `read="duckdb"`,
 `compile.py` sets `CANONICAL_DIALECT = "duckdb"`, and DuckDB is the one dialect that skips
-transpiling. Those are deliberate — DuckDB *is* the canonical dialect — but they mean N4's
-promise is currently verified for imports, not for behaviour.
+transpiling. Those are deliberate — DuckDB *is* the canonical dialect — and all three are
+unchanged by the Postgres adapter.
+
+**Behaviour is now verified too** (spec 010). Adding Postgres changed zero files under
+`engine/`, and `tests/test_postgres_differential.py` runs the same requests through both
+engines and fails if the answers differ — which is the only check that can catch a dialect bug
+producing a plausible wrong number. Two findings came out of it, both worth knowing before you
+touch the seam:
+
+- `close()` was missing from the `Adapter` Protocol. Both adapters had it and the CLI called
+  it; nothing caught the gap because the CLI was typed against the concrete class. **One
+  implementation cannot tell you a seam is incomplete.**
+- `DATE_TRUNC` on a date column returns a timezone-aware value on Postgres and a naive one on
+  DuckDB, from byte-identical SQL — Postgres picks its `timestamptz` overload. Buckets and
+  totals agree, so a test pins the difference; resolving it properly means changing how
+  `compile.py` emits the truncation, which is a spec of its own.
 
 If adding a datasource forces a change under `engine/`, that is the design smell the
 constitution names — raise it as an issue rather than working around it.

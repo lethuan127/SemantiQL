@@ -33,7 +33,7 @@ step "types (mypy)"
 uv run mypy || fail "mypy"
 
 step "tests (pytest)"
-uv run pytest -m "not e2e" || fail "pytest"
+uv run pytest -m "not e2e and not pg" || fail "pytest"
 
 # The end-to-end suite builds a TPC-H corpus and checks the engine against hand-written SQL.
 # It is a separate step so its cost, and any skip reason, are visible rather than buried in
@@ -42,6 +42,17 @@ uv run pytest -m "not e2e" || fail "pytest"
 # because the README promises a clone that runs without one.
 step "end-to-end (pytest -m e2e)"
 uv run pytest -m e2e || fail "end-to-end tests"
+
+# The differential suite answers the same question on DuckDB and on Postgres and fails if the
+# two disagree — the one check that can catch a dialect bug producing a plausible wrong number.
+# It needs a database this repo cannot bundle, so absent SEMANTIQL_TEST_DSN it skips and this
+# step still passes. Separate, like the e2e step, so the skip is a visible line rather than a
+# dot in someone else's run.
+#
+#   docker run --rm -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17
+#   SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@localhost/postgres ./scripts/verify.sh
+step "postgres differential (pytest -m pg)"
+uv run pytest -m pg || fail "postgres differential tests"
 
 # The change records under specs/ are an OKF bundle; conformance errors are failures.
 # Absent Python yaml this validator degrades rather than lying, so it runs under uv too.

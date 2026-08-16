@@ -5,6 +5,11 @@
 # which is the trap that catches most first-time public repos. Anything needing
 # credentials — publishing, integration tests against a real service — belongs in a
 # separate workflow triggered on push to main, never here.
+#
+# The Postgres service container below is not an exception to that. A service container has no
+# credential to store: its password is a literal in this file, and the database it guards is
+# created for one job and thrown away with it. This file must never reference the secrets
+# context at all — that is the property a fork PR depends on, and it is grep-checkable.
 name: verify
 
 on:
@@ -25,8 +30,34 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.11 is the declared floor, so it is tested rather than merely asserted.
-        python-version: ["3.11", "3.13"]
+        include:
+          # 3.11 is the declared floor, so it is tested rather than merely asserted. It also
+          # runs with no DSN on purpose: that exercises the Postgres suite's *skip* path on
+          # every CI run, so the promise that a clone works without a database is checked
+          # continuously rather than only when someone breaks it.
+          - python-version: "3.11"
+            test-dsn: ""
+          - python-version: "3.13"
+            test-dsn: postgresql://postgres:postgres@localhost:5432/postgres
+
+    # No secret is involved, which is what lets this run on a pull request from a fork. The
+    # password below is a literal because the database is created fresh for this job and
+    # destroyed with it — there is nothing here that outlives the run or exists anywhere else.
+    # Pinned to a major so a CI failure is never caused by an upstream release nobody chose;
+    # 17 is what spec 010 was developed and verified against.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v7
 
@@ -40,3 +71,5 @@ jobs:
 
       - name: Verify
         run: ./scripts/verify.sh
+        env:
+          SEMANTIQL_TEST_DSN: ${{ matrix.test-dsn }}

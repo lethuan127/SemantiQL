@@ -118,3 +118,55 @@ def test_a_query_can_target_a_database_file(tmp_path: pytest.TempPathFactory) ->
     )
     assert main(["doctor", "-m", str(model), "--database", str(path)]) == 0
     assert main(["SELECT total FROM t", "-m", str(model), "--database", str(path)]) == 0
+
+
+# --- Adapter selection (spec 010). The DuckDB path above must keep working untouched; these
+# cover the flags that arrived with the second datasource.
+
+
+def test_the_default_datasource_is_still_duckdb(capsys: pytest.CaptureFixture[str]) -> None:
+    """Every documented example omits --datasource, so the default must not move."""
+    assert main(["SELECT revenue, channel FROM orders"]) == 0
+    assert "956.5" in capsys.readouterr().out
+
+
+def test_a_postgres_flag_on_a_duckdb_run_is_an_error(capsys: pytest.CaptureFixture[str]) -> None:
+    """Silently ignoring --dsn would connect to DuckDB while the user believed otherwise.
+
+    The answer would look perfectly fine, which is the failure mode N2 exists to refuse — so
+    argparse rejects the combination instead.
+    """
+    with pytest.raises(SystemExit):
+        main(["SELECT revenue FROM orders", "--dsn", "postgresql://localhost/db"])
+    assert "Postgres-only" in capsys.readouterr().err
+
+
+def test_a_duckdb_flag_on_a_postgres_run_is_an_error(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main(["SELECT revenue FROM orders", "--datasource", "postgres", "--database", "x.duckdb"])
+    assert "DuckDB-only" in capsys.readouterr().err
+
+
+def test_an_unreachable_postgres_exits_three_with_a_fix_hint(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exit 3 is "the datasource is the problem", distinct from 1, "the request is".
+
+    A first-time user hits this before anything else, so the message names what to check
+    rather than only what failed.
+    """
+    code = main(
+        [
+            "SELECT revenue FROM orders",
+            "-m",
+            "examples/retail/semantic_model.postgres.yml",
+            "--datasource",
+            "postgres",
+            "--dsn",
+            "postgresql://postgres@127.0.0.1:59999/nope",
+        ]
+    )
+    err = capsys.readouterr().err
+    assert code == 3
+    assert "could not connect to Postgres" in err
+    assert "check the server is running" in err

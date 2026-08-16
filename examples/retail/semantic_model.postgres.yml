@@ -1,0 +1,66 @@
+# The Postgres sibling of `semantic_model.yml`, and the reason it exists is worth reading
+# before you assume it is a copy.
+#
+# The semantic content below — every dimension, measure and metric — is identical to the
+# DuckDB model, character for character. That is constitution N3 doing its job: what a
+# number *means* does not depend on which engine computes it.
+#
+# Two lines differ, and only two:
+#
+#   * `dialect: postgres`, which decides what the compiler transpiles to.
+#   * `source: orders` rather than `source: orders.csv`.
+#
+# The second one is the honest limit of "swap one line and go". DuckDB reads a CSV path
+# directly; Postgres has no file sources at all, so a path has to become a table first. The
+# adapter says so by name rather than passing the path through as a table name and letting
+# the reader chase a missing relation (spec 010, clarification Q6).
+version: 1
+
+datasource:
+  name: retail
+  dialect: postgres
+
+tables:
+  orders:
+    # A table this time. `tests/postgres_fixtures.py` loads it from the same orders.csv the
+    # DuckDB model reads, which is what lets the differential suite compare like with like.
+    source: orders
+
+    dimensions:
+      channel:
+        column: channel
+        type: string
+        label: Sales channel
+        description: How the order was placed — web, retail, or partner.
+      region:
+        column: region
+        type: string
+        label: Region
+      order_date:
+        column: order_date
+        type: date
+        label: Order date
+
+    measures:
+      revenue:
+        column: amount
+        agg: sum
+        label: Revenue
+        description: Sum of order amounts. The one sanctioned definition of revenue.
+      order_count:
+        column: order_id
+        agg: count
+        label: Orders
+        description: Number of order lines.
+      average_order_value:
+        column: amount
+        agg: avg
+        label: Average order value
+
+    metrics:
+      revenue_per_order:
+        expression: revenue / order_count
+        label: Revenue per order
+        description: >-
+          Revenue divided by order lines, computed after grouping — so revenue per order for
+          a channel uses that channel's own revenue and its own count.
