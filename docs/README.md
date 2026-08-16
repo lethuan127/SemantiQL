@@ -12,3 +12,4 @@ Working design documents. Everything here is draft-stage and evolves as the proj
 | [06-research-notes.md](06-research-notes.md) | Prior art, benchmarks, local LLM notes, standards |
 | [07-code-map.md](07-code-map.md) | The four layers mapped to modules, and the adapter seam |
 | [08-positioning.md](08-positioning.md) | What SemantiQL aims to do differently, and how to judge it |
+| [09-data-modeling.md](09-data-modeling.md) | Writing the semantic model — every field, what it compiles to, what is refused |
