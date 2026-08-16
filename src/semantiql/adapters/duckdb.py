@@ -19,7 +19,7 @@ from typing import Any
 import duckdb
 from sqlglot import exp
 
-from semantiql.adapters.base import AdapterError
+from semantiql.adapters.base import AdapterError, Column, ColumnKind
 
 
 class DuckDBAdapter:
@@ -53,12 +53,76 @@ class DuckDBAdapter:
             return exp.func("read_parquet", exp.Literal.string(source))
         return exp.to_table(source)
 
-    def columns(self, relation: str) -> list[str]:
+    #: DuckDB's type names, mapped to the semantic model's vocabulary. Matched on the *base*
+    #: type — the name with its parameters and array suffix removed — rather than by prefix,
+    #: because prefixes lie: `INTERVAL` starts with `INT` without being a number, and
+    #: `INTEGER[]` is a list of numbers rather than one. Both were classified wrongly by a
+    #: prefix match until a test said so.
+    _KINDS: dict[str, ColumnKind] = {
+        "BOOLEAN": "boolean",
+        "BOOL": "boolean",
+        "LOGICAL": "boolean",
+        "DATE": "date",
+        "DATETIME": "date",
+        "TINYINT": "number",
+        "SMALLINT": "number",
+        "INTEGER": "number",
+        "BIGINT": "number",
+        "HUGEINT": "number",
+        "INT": "number",
+        "INT1": "number",
+        "INT2": "number",
+        "INT4": "number",
+        "INT8": "number",
+        "UTINYINT": "number",
+        "USMALLINT": "number",
+        "UINTEGER": "number",
+        "UBIGINT": "number",
+        "DECIMAL": "number",
+        "NUMERIC": "number",
+        "REAL": "number",
+        "DOUBLE": "number",
+        "FLOAT": "number",
+        "FLOAT4": "number",
+        "FLOAT8": "number",
+        "VARCHAR": "string",
+        "CHAR": "string",
+        "BPCHAR": "string",
+        "TEXT": "string",
+        "STRING": "string",
+        "UUID": "string",
+    }
+
+    @classmethod
+    def _kind(cls, native_type: str) -> ColumnKind:
+        """Classify one DuckDB type, answering `other` rather than guessing."""
+        upper = native_type.strip().upper()
+        if upper.endswith("[]"):
+            # A list of numbers is not a number: `sum` over it fails, and calling it one would
+            # let doctor bless a model the database will reject.
+            return "other"
+        base = upper.split("(", 1)[0].strip()
+        if base.startswith("TIMESTAMP"):  # TIMESTAMP, TIMESTAMP WITH TIME ZONE, TIMESTAMP_NS
+            return "date"
+        return cls._KINDS.get(base, "other")
+
+    def columns(self, source: str) -> list[Column]:
+        """Describe `source` without reading a row of it.
+
+        The probe is built from `relation()` rather than interpolated, so a `source` containing
+        a quote stays a value — the same property the FROM clause has, for the same reason —
+        and a CSV path is described as readily as a table name.
+        """
+        probe = exp.select(exp.Star()).from_(self.relation(source)).limit(0).sql(dialect="duckdb")
         try:
-            cur = self._conn.execute(f"SELECT * FROM {relation} LIMIT 0")
+            cur = self._conn.execute(probe)
         except duckdb.Error as exc:
-            raise AdapterError(f"could not read {relation}: {exc}") from exc
-        return [d[0] for d in cur.description or []]
+            raise AdapterError(f"could not read {source!r}: {exc}") from exc
+        described = cur.description or []
+        return [
+            Column(name=str(d[0]), native_type=str(d[1]), kind=self._kind(str(d[1])))
+            for d in described
+        ]
 
     def execute(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
         try:

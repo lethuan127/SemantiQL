@@ -10,9 +10,10 @@ SemantiQL sits between AI agents (LLMs) and your database. Instead of writing SQ
 [@lethuan127](https://github.com/lethuan127) as time allows: issues and pull requests are
 triaged weekly, with no SLA. Open an issue before writing a large pull request.
 
-The engine below runs today: a semantic model, validation, sqlglot transpiling, and a DuckDB
-example. The MCP server, Postgres, and the accuracy benchmark are not built yet — see the
-[roadmap](#roadmap).
+The engine below runs today: a semantic model with dimensions, measures and metrics;
+validation; filters, ordering, limits and time grains; sqlglot transpiling; `semantiql doctor`
+to check a model against its database; and a DuckDB example. The MCP server, Postgres, and the
+accuracy benchmark are not built yet — see the [roadmap](#roadmap).
 
 ## Quickstart
 
@@ -47,6 +48,16 @@ refused: 'profit' is not defined on table 'orders'.
 
 That refusal is the point of the project, not a limitation. Run `./scripts/verify.sh` to
 check everything the CI checks.
+
+Check a model against its database before trusting it:
+
+```bash
+$ uv run semantiql doctor
+✓ datasource 'retail' speaks duckdb
+orders
+  ✓ source 'examples/retail/orders.csv' has 5 columns
+  ✓ 3 dimensions, 3 measures and 1 metric all resolve
+```
 
 > ⚠️ Early stage — under active development. Not ready for production use.
 
@@ -92,7 +103,7 @@ LLMs answering questions over raw SQL schemas are wrong most of the time (~16% a
 | Stage | Scope |
 |---|---|
 | MVP | DuckDB + Postgres · semantic model YAML · semantic SQL → raw SQL engine · MCP server for Claude · accuracy benchmark vs. raw-table querying |
-| Next | MySQL, SQLite · verified-examples loop · `semantiql doctor` |
+| Next | MySQL, SQLite · verified-examples loop |
 | Later | BigQuery, Snowflake, Databricks · remote server mode · access control |
 
 Out of scope: NoSQL databases (MongoDB, etc.).

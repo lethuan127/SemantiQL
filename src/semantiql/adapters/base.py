@@ -15,13 +15,36 @@ reaches data on terms nothing checked (N1).
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from sqlglot import exp
 
 
 class AdapterError(Exception):
     """The datasource could not be reached, or rejected the SQL."""
+
+
+#: The semantic model's own type vocabulary, plus `other` for a type the adapter cannot map.
+#: Deliberately the model's words rather than any engine's: DuckDB says `VARCHAR`, Postgres
+#: says `character varying`, BigQuery says `STRING`, and the checker that compares a column to
+#: `type:` must not learn all three. Translation is the adapter's job (N4).
+ColumnKind = Literal["string", "date", "number", "boolean", "other"]
+
+
+@dataclass(frozen=True)
+class Column:
+    """A column as the datasource describes it.
+
+    `native_type` is the engine's own name, kept for error messages a DBA will recognise.
+    `kind` is that type expressed in the model's vocabulary — or `other`, which means the
+    adapter could not tell and callers must treat as silence rather than as a mismatch. An
+    honest unknown is worth more here than a confident wrong answer.
+    """
+
+    name: str
+    native_type: str
+    kind: ColumnKind
 
 
 @runtime_checkable
@@ -42,8 +65,17 @@ class Adapter(Protocol):
         """
         ...
 
-    def columns(self, relation: str) -> list[str]:
-        """Column names available in `relation` — used to check the model against reality."""
+    def columns(self, source: str) -> list[Column]:
+        """Describe the columns of a model `source` — the basis for checking model vs reality.
+
+        Takes the `source` exactly as the semantic model writes it, not a relation string: the
+        adapter turns it into something selectable with its own `relation()`, so a CSV path and
+        a table name are both handled here rather than by the caller, and the value is built
+        into the probe rather than interpolated into it.
+
+        Classifies each column into `ColumnKind`. An adapter that cannot map one of its types
+        returns `other`.
+        """
         ...
 
     def execute(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:

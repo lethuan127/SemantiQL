@@ -1,5 +1,11 @@
 # Update Log
 
+## 2026-08-17
+* **Update**: Shipped 009 — `semantiql doctor` checks a model against its database in one pass; `Adapter.columns` now takes a `source`, builds its probe through `relation()` instead of interpolating, and classifies types into the model's vocabulary. 21 new tests, verify gate green at 213 + 27. Writing the classifier's test found two real bugs in it — `INTERVAL` matched the `INT` prefix and `INTEGER[]` read as a number [009](/009-doctor/spec.md)
+* **Creation**: Plan, tasks and validation drafted for 009 — `Adapter.columns` becomes source-based and typed, a `doctor` module sits outside `engine/`, and the CLI gains the verb plus `--database`. 10 files to modify, 2 to add [009](/009-doctor/plan.md)
+* **Update**: Clarified 5 ambiguities for 009 — `Adapter.columns` changes to take a `source` and build via `relation()` rather than interpolating; the adapter classifies its own column types; `--database` added; report-only, no `--fix`; the sample-questions half of the docs' promise is documented as still missing [009](/009-doctor/clarifications.md)
+* **Creation**: Spec drafted for `semantiql doctor` — nothing checks a model against reality today, and `type:` now decides how filters behave [009](/009-doctor/spec.md)
+
 ## 2026-08-16
 * **Update**: Shipped 008 — end-to-end suite over a locally generated TPC-H corpus: 27 tests checking the engine against hand-written SQL, plus an edge table for the nulls, booleans and zero divisors TPC-H lacks. Verified scale-independent at sf=0.1. **Checkpoint 3 did not fire** — the run went from the plan straight into implementation, so `tasks.md` is a record written afterwards and carries no attestation [008](/008-e2e-suite/validation.md)
 * **Creation**: Plan and impact map drafted for 008 — one session fixture generates TPC-H into a temporary DuckDB file, denormalises it to a single view, and hands tests a read-only adapter. 4 files to modify, 5 to add [008](/008-e2e-suite/plan.md)

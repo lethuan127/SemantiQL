@@ -119,11 +119,25 @@ def test_the_file_backed_connection_is_read_only(corpus: Path) -> None:
         adapter.close()
 
 
-def test_the_adapter_can_introspect_the_corpus(corpus: Path) -> None:
-    """`Adapter.columns` has no caller in the engine yet; this keeps it honest until it does."""
+def test_the_adapter_describes_the_corpus_for_doctor(corpus: Path) -> None:
+    """`Adapter.columns` is what `semantiql doctor` checks a model against (spec 009).
+
+    Asserting the classification, not only the names: the whole point of `kind` is that the
+    checker can compare a column to a `type:` without learning DuckDB's vocabulary.
+    """
     adapter = DuckDBAdapter(str(corpus))
     try:
-        assert adapter.columns("edge") == ["label", "flagged", "amount", "refunds"]
+        described = {c.name: c.kind for c in adapter.columns("edge")}
+        assert described == {
+            "label": "string",
+            "flagged": "boolean",
+            "amount": "number",
+            "refunds": "number",
+        }
+        sales = {c.name: c.kind for c in adapter.columns("sales")}
+        assert sales["order_date"] == "date"
+        assert sales["net_amount"] == "number"
+        assert sales["segment"] == "string"
     finally:
         adapter.close()
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 from sqlglot import exp
 
+from semantiql.adapters.base import Column
 from semantiql.engine.run import run
 from semantiql.engine.validate import _CLAUSE_LABELS, Refusal, ValidRequest, validate
 from semantiql.knowledge.model import SemanticModel
@@ -29,7 +30,7 @@ class ExplodingAdapter:
     def relation(self, source: str) -> exp.Expr:  # pragma: no cover
         raise AssertionError(f"a refused request resolved a relation: {source!r}")
 
-    def columns(self, relation: str) -> list[str]:  # pragma: no cover
+    def columns(self, source: str) -> list[Column]:  # pragma: no cover
         raise AssertionError("validation must run before the adapter is consulted")
 
     def execute(self, sql: str) -> tuple[list[str], list[tuple[object, ...]]]:  # pragma: no cover

@@ -11,6 +11,7 @@ import sys
 
 from semantiql.adapters.base import AdapterError
 from semantiql.adapters.duckdb import DuckDBAdapter
+from semantiql.doctor import Finding, check, problems
 from semantiql.engine.run import Result, run
 from semantiql.engine.validate import Refusal
 from semantiql.knowledge.loader import ModelError, load_model
@@ -22,7 +23,6 @@ EXAMPLE_MODEL = "examples/retail/semantic_model.yml"
 #: — a confusing message from the validation layer about a command the README advertises.
 NOT_YET_IMPLEMENTED = {
     "init": "the guided setup wizard that generates a semantic model from your database",
-    "doctor": "the setup health check",
 }
 
 
@@ -37,13 +37,64 @@ def _render(result: Result) -> str:
     return "\n".join(lines)
 
 
+def _render_findings(findings: list[Finding]) -> str:
+    """Group by table, so a reader sees one heading and its problems beneath it."""
+    lines: list[str] = []
+    current: str | None = ""
+    for finding in findings:
+        if finding.table != current:
+            current = finding.table
+            if current is not None:
+                lines.append(current)
+        mark = "✗" if finding.is_problem else "✓"
+        indent = "  " if finding.table is not None else ""
+        lines.append(f"{indent}{mark} {finding}")
+    return "\n".join(lines)
+
+
+def _doctor(model_path: str, database: str) -> int:
+    """Report where the model and the database disagree. Never edits either."""
+    try:
+        model = load_model(model_path)
+    except ModelError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        adapter = DuckDBAdapter(database)
+    except AdapterError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
+    try:
+        findings = check(model, adapter)
+    finally:
+        adapter.close()
+
+    print(_render_findings(findings))
+    failed = problems(findings)
+    tables = len(model.table_names)
+    noun = "table" if tables == 1 else "tables"
+    if failed:
+        print(
+            f"\n{tables} {noun} checked, {len(failed)} "
+            f"{'problem' if len(failed) == 1 else 'problems'} found.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"\n{tables} {noun} checked, no problems found.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="semantiql",
         description="Query a database through a semantic model.",
     )
     parser.add_argument(
-        "sql", nargs="?", help="semantic SQL, e.g. 'SELECT revenue, channel FROM orders'"
+        "sql",
+        nargs="?",
+        help="semantic SQL, e.g. 'SELECT revenue, channel FROM orders' — or the verb 'doctor'",
     )
     parser.add_argument(
         "-m",
@@ -52,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
         help=f"path to the semantic model YAML (default: {EXAMPLE_MODEL})",
     )
     parser.add_argument("--show-sql", action="store_true", help="print the generated physical SQL")
+    parser.add_argument(
+        "--database",
+        default=":memory:",
+        help="DuckDB database file to query (default: in-memory, which reads CSV and Parquet "
+        "sources directly)",
+    )
     # Exit codes: 0 ok · 1 refused (the request is not answerable) · 2 bad model · 3 datasource
     args = parser.parse_args(argv)
 
@@ -60,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     verb = args.sql.strip().lower()
+    if verb == "doctor":
+        return _doctor(args.model, args.database)
+
     if verb in NOT_YET_IMPLEMENTED:
         print(
             f"semantiql {verb} is not implemented yet — {NOT_YET_IMPLEMENTED[verb]}.\n\n"
@@ -76,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    adapter = DuckDBAdapter()
+    adapter = DuckDBAdapter(args.database)
     try:
         outcome = run(args.sql, model, adapter)
     except AdapterError as exc:

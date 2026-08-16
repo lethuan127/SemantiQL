@@ -20,4 +20,5 @@ bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md)
 * [006-derived-metrics/](006-derived-metrics/) - T2, shipped - metrics derived from measures, with a closed expression grammar and a guarded divisor
 * [007-time-grains/](007-time-grains/) - T2, shipped - DATE_TRUNC over date dimensions, with the year-collapsing forms refused
 * [008-e2e-suite/](008-e2e-suite/) - T2, shipped (checkpoint 3 skipped) - an end-to-end suite over a locally generated TPC-H corpus, checked against hand-written SQL
+* [009-doctor/](009-doctor/) - T2, shipped - a health check that finds where the model and the real schema disagree
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above

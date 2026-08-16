@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import duckdb
 import pytest
 
 from semantiql.cli import NOT_YET_IMPLEMENTED, main
@@ -47,3 +50,71 @@ def test_a_missing_model_is_reported_not_raised(capsys: pytest.CaptureFixture[st
     code = main(["SELECT revenue FROM orders", "-m", "does/not/exist.yml"])
     assert code == 2
     assert "no semantic model" in capsys.readouterr().err
+
+
+# --- `semantiql doctor` (spec 009). The exit code is the contract a setup script depends on.
+
+
+def test_doctor_on_the_bundled_example_is_healthy(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(["doctor", "-m", "examples/retail/semantic_model.yml"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "no problems found" in out
+    assert "✓" in out
+
+
+def test_doctor_reports_problems_and_exits_nonzero(
+    tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    csv = Path("examples/retail/orders.csv").resolve()
+    model = Path(str(tmp_path)) / "broken.yml"
+    model.write_text(
+        "version: 1\n"
+        "datasource: {name: retail, dialect: duckdb}\n"
+        "tables:\n"
+        "  orders:\n"
+        f"    source: {csv}\n"
+        "    dimensions: {channel: {column: chanel, type: string}}\n"
+        "    measures: {revenue: {column: amount, agg: sum}}\n"
+    )
+    code = main(["doctor", "-m", str(model)])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "chanel" in captured.out
+    assert "channel" in captured.out, "the suggestion should be offered"
+    assert "1 problem" in captured.err
+
+
+def test_doctor_reports_an_unloadable_model(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(["doctor", "-m", "does/not/exist.yml"])
+    assert code == 2
+    assert "no semantic model" in capsys.readouterr().err
+
+
+def test_doctor_is_no_longer_advertised_as_unbuilt() -> None:
+    from semantiql.cli import NOT_YET_IMPLEMENTED
+
+    assert "doctor" not in NOT_YET_IMPLEMENTED
+    assert "init" in NOT_YET_IMPLEMENTED, "init is still a promise, and should still say so"
+
+
+def test_a_query_can_target_a_database_file(tmp_path: pytest.TempPathFactory) -> None:
+    """`--database` exists so doctor can check a model over real tables (FR-8)."""
+    path = Path(str(tmp_path)) / "w.duckdb"
+    connection = duckdb.connect(str(path))
+    connection.execute("CREATE TABLE t (a INTEGER, b VARCHAR)")
+    connection.execute("INSERT INTO t VALUES (2, 'x'), (3, 'y')")
+    connection.close()
+
+    model = Path(str(tmp_path)) / "m.yml"
+    model.write_text(
+        "version: 1\n"
+        "datasource: {name: w, dialect: duckdb}\n"
+        "tables:\n"
+        "  t:\n"
+        "    source: t\n"
+        "    dimensions: {b: {column: b, type: string}}\n"
+        "    measures: {total: {column: a, agg: sum}}\n"
+    )
+    assert main(["doctor", "-m", str(model), "--database", str(path)]) == 0
+    assert main(["SELECT total FROM t", "-m", str(model), "--database", str(path)]) == 0

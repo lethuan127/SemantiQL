@@ -411,15 +411,30 @@ model matches what a model tends to emit.
 | unknown key, bad enum, duplicate key, name clash | **load** | `ModelError`, CLI exit `2` |
 | model dialect ≠ adapter dialect | **run**, before validation | `Refusal`, CLI exit `1` |
 | name the AI asked for is not in the model | **run**, before the database is touched | `Refusal`, exit `1` |
-| `source` does not exist | **execute** | `AdapterError` — `IO Error: No files found…` / `Catalog Error: Table … does not exist`, exit `3` |
-| `column` does not exist | **execute** | `AdapterError` — `Binder Error: Referenced column "profit" not found` |
-| `agg: sum` on a text column | **execute** | `AdapterError` — `No function matches the given name and argument types 'sum(VARCHAR)'` |
-| `type:` disagrees with the real column | **never** for the read; **run** for a filter | rows come back regardless, but filter literals are checked against the declared type, so the wrong `type:` refuses valid filters (§3.4) |
+| `source` does not exist | **`semantiql doctor`**, or **execute** | doctor names it; otherwise `AdapterError` — `IO Error: No files found…`, exit `3` |
+| `column` does not exist | **`semantiql doctor`**, or **execute** | doctor names it and suggests the real column; otherwise `Binder Error: Referenced column "profit" not found` |
+| `agg: sum` on a text column | **`semantiql doctor`**, or **execute** | doctor names it; otherwise `No function matches the given name and argument types 'sum(VARCHAR)'` |
+| `type:` disagrees with the real column | **`semantiql doctor`** | nothing else catches it: rows come back regardless, and the only symptom is a valid filter being refused for the wrong reason (§3.4) |
 
-The bottom half of that table is the argument for `semantiql doctor` and schema
-introspection, both on the roadmap and neither built. `Adapter.columns()` exists and is
-tested but no engine code calls it yet — model-vs-reality checking is the obvious next use.
-Until then, a model change is only proven by running a query against it.
+Everything in the bottom half is what **`semantiql doctor`** is for:
+
+```
+$ semantiql doctor -m model.yml --database warehouse.duckdb
+✓ datasource 'retail' speaks duckdb
+orders
+  ✓ source 'orders' has 12 columns
+  ✗ measure 'revenue' reads column 'amont', which does not exist  (did you mean: amount?)
+  ✗ dimension 'order_date' is declared string, but column 'order_date' is DATE — filters on
+    it will be typed wrongly
+```
+
+It reads schema metadata, reports every mismatch in one pass with suggestions, and exits
+non-zero so a setup script can stop. It never edits the model: the YAML is the source of truth,
+and a suggestion here carries exactly the authority a refusal's `did_you_mean` does.
+
+The one row it cannot help with is the last: a `type:` that disagrees with reality is
+*invisible* without it, because the rows still come back and the only symptom is a correct
+filter being refused. Run doctor after any schema change upstream.
 
 ---
 
