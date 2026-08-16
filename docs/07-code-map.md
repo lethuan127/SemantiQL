@@ -100,7 +100,7 @@ An adapter provides four things, and `adapters/duckdb.py` is the worked example:
 |---|---|
 | `dialect` | the sqlglot dialect name SQL is transpiled to before `execute` |
 | `relation(source)` | how a model's `source` becomes a selectable relation — a table name passes through, a `.csv`/`.parquet` path becomes a reader call. Returns a **built sqlglot expression, never a string**: a string would be re-parsed by the compiler, letting a quote in `source` inject relations into the FROM clause |
-| `columns(source)` | describes a model `source` as `Column(name, native_type, kind)`, building its probe through `relation()` rather than interpolating. `kind` translates the engine's own type names into the model's four, so `doctor` can compare a column to `type:` without learning any dialect's vocabulary — that translation is the adapter's job (N4) |
+| `columns(source)` | describes a model `source` as `Column(name, native_type, kind)`, building its probe through `relation()` rather than interpolating. `kind` translates the engine's own type names into the model's four, so `doctor` can compare a column to `type:` without learning any dialect's vocabulary — that translation is the adapter's job (N4). `carries_timezone` rides alongside as one bit rather than a fifth `kind`, because it matters for exactly one thing (time grains) and a fifth kind would make `doctor` report every `timestamptz` column as a filter-typing mismatch (spec 011) |
 | `execute(sql)` | run validated SQL; return `(column names, rows)` |
 
 What the core guarantees in return: `execute` only ever receives SQL whose every identifier

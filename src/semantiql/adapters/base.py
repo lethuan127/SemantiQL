@@ -45,6 +45,19 @@ class Column:
     name: str
     native_type: str
     kind: ColumnKind
+    carries_timezone: bool = False
+    """Whether this column stores an instant with a zone attached (`timestamptz`).
+
+    Deliberately a flag rather than a fifth `ColumnKind`. `doctor` compares `kind` to the
+    model's `type:` for **equality**, so a fifth value would make every `timestamptz` column
+    report "declared date, but the column is timestamp with time zone — filters on it will be
+    typed wrongly". That is false: filtering a `timestamptz` against a date literal is fine.
+    The distinction matters for exactly one thing — time grains — so it travels as one bit
+    beside `kind` instead of fragmenting the four-word vocabulary (spec 011).
+
+    Defaults to `False`, so an adapter written before this existed keeps working and simply
+    reports "no zone", which is the safe answer for the types it was built for.
+    """
 
 
 @runtime_checkable

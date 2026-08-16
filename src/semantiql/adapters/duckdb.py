@@ -94,6 +94,20 @@ class DuckDBAdapter:
     }
 
     @classmethod
+    def _carries_timezone(cls, native_type: str) -> bool:
+        """Does this DuckDB type store a zone? Only the TZ-suffixed timestamps do.
+
+        `_kind` deliberately folds every `TIMESTAMP*` into `date` — for filtering they behave
+        alike. Grains are the one place they do not, so this reads the same string again and
+        answers the narrower question (spec 011).
+        """
+        upper = native_type.strip().upper()
+        if upper.endswith("[]"):
+            return False
+        base = upper.split("(", 1)[0].strip()
+        return base in {"TIMESTAMPTZ", "TIMESTAMP WITH TIME ZONE"}
+
+    @classmethod
     def _kind(cls, native_type: str) -> ColumnKind:
         """Classify one DuckDB type, answering `other` rather than guessing."""
         upper = native_type.strip().upper()
@@ -120,7 +134,12 @@ class DuckDBAdapter:
             raise AdapterError(f"could not read {source!r}: {exc}") from exc
         described = cur.description or []
         return [
-            Column(name=str(d[0]), native_type=str(d[1]), kind=self._kind(str(d[1])))
+            Column(
+                name=str(d[0]),
+                native_type=str(d[1]),
+                kind=self._kind(str(d[1])),
+                carries_timezone=self._carries_timezone(str(d[1])),
+            )
             for d in described
         ]
 

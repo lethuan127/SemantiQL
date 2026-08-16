@@ -20,9 +20,11 @@ Skips, never fails, when no Postgres is reachable — see `postgres_dsn` in `con
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 
@@ -51,12 +53,16 @@ REQUESTS = [
     "SELECT revenue, channel FROM orders ORDER BY revenue DESC",
     "SELECT revenue, channel FROM orders ORDER BY revenue DESC LIMIT 2",
     "SELECT revenue_per_order, channel FROM orders",
+    # All five grains, not just month (spec 011, FR-3). Before 011 these disagreed — Postgres
+    # returned a timezone-aware value from byte-identical SQL — and `month` was pinned in a
+    # separate test recording the divergence. The cast in `compile.py` removed it, so they are
+    # ordinary cases again.
+    "SELECT revenue, DATE_TRUNC('year', order_date) FROM orders",
+    "SELECT revenue, DATE_TRUNC('quarter', order_date) FROM orders",
+    "SELECT revenue, DATE_TRUNC('month', order_date) FROM orders",
+    "SELECT revenue, DATE_TRUNC('week', order_date) FROM orders",
+    "SELECT revenue, DATE_TRUNC('day', order_date) FROM orders",
 ]
-
-#: `DATE_TRUNC` is deliberately **not** in the list above. It is the one construct the two
-#: engines do not agree on, and it gets its own test rather than a quietly relaxed comparison.
-#: See `test_date_trunc_buckets_agree_but_postgres_attaches_a_timezone`.
-DATE_TRUNC_REQUEST = "SELECT revenue, DATE_TRUNC('month', order_date) FROM orders"
 
 #: Hand-computed from the ten rows of examples/retail/orders.csv, matching the figures in
 #: tests/test_example_end_to_end.py. Repeated rather than imported so that changing one file
@@ -124,59 +130,32 @@ def test_the_two_engines_emit_different_sql() -> None:
     assert "READ_CSV_AUTO" in duck.upper()
 
 
-def test_date_trunc_buckets_agree_but_postgres_attaches_a_timezone(
+def test_grains_now_return_the_same_naive_value(
     model: SemanticModel,
     postgres_model: SemanticModel,
     adapter: DuckDBAdapter,
     postgres_adapter: PostgresAdapter,
 ) -> None:
-    """The first real divergence the differential suite found. Pinned, not smoothed over.
+    """What replaced the pinned divergence (spec 011, FR-9).
 
-    The two engines receive **byte-identical SQL** — sqlglot transpiles `DATE_TRUNC('MONTH', x)`
-    to itself, so nothing in SemantiQL causes this. Postgres resolves `date_trunc(text, date)`
-    to its `timestamptz` overload, so the result carries the **server's** timezone; DuckDB
-    returns a naive timestamp:
+    This test used to assert the opposite: that Postgres returned a timezone-aware value where
+    DuckDB returned a naive one, from byte-identical SQL. That was pinned rather than fixed
+    because fixing it meant changing `compile.py`, which spec 010 had forbidden itself.
 
-        DuckDB     2026-07-01 00:00:00
-        Postgres   2026-07-01 00:00:00+07:00      (+07:00 = whatever the server is set to)
-
-    What is *not* wrong: no row is misplaced. The column is a `date`, so every value is
-    midnight and truncating to month lands on the 1st either way. Revenue per bucket matches
-    exactly, which is what the user actually reads. That is why this is a pinned difference
-    rather than a blocked release.
-
-    What *is* wrong, and why it needs its own spec: the value depends on a server setting
-    SemantiQL never declares, never validates, and the user never sees. Two servers holding the
-    same data answer differently. And on a `timestamptz` column — which the model may legally
-    declare `type: date` — the same overload would bucket rows near a month boundary by the
-    server's timezone, which is a genuinely wrong number rather than a cosmetic one.
-
-    Fixing it means changing how `compile.py` emits the truncation, and spec 010's FR-9 forbids
-    touching `engine/` — the whole point of this change is that a second datasource needs no
-    core edit. So it is reported as a finding and carried forward, exactly as `plan.md`'s OQ-1
-    said a transpile failure would be.
-
-    This test locks in today's behaviour: the buckets and the money must agree, and Postgres is
-    expected to be timezone-aware. If either half changes, someone finds out here.
+    `compile.py` now casts the column before truncating, which stops Postgres reaching for its
+    `timestamptz` overload. So the assertion inverts: **both engines must return a naive
+    value**, and if either starts carrying a zone again the cast has been lost.
     """
-    duck = _answer(DATE_TRUNC_REQUEST, model, adapter)
-    post = _answer(DATE_TRUNC_REQUEST, postgres_model, postgres_adapter)
+    sql = "SELECT revenue, DATE_TRUNC('month', order_date) FROM orders"
+    duck = _answer(sql, model, adapter)
+    post = _answer(sql, postgres_model, postgres_adapter)
 
-    assert duck.columns == post.columns
     bucket = duck.columns.index("order_date_month")
-    revenue = duck.columns.index("revenue")
-
-    # The answer a user sees: which month, and how much. These must match exactly.
-    by_month_duck = {row[bucket].date(): _comparable(row[revenue]) for row in duck.rows}
-    by_month_post = {row[bucket].date(): _comparable(row[revenue]) for row in post.rows}
-    assert by_month_duck == by_month_post
-
-    # The divergence itself, asserted rather than tolerated.
-    assert all(row[bucket].tzinfo is None for row in duck.rows), "DuckDB went timezone-aware"
-    assert all(row[bucket].tzinfo is not None for row in post.rows), (
-        "Postgres stopped attaching a timezone — the finding this test pins may be resolved; "
-        "check whether the follow-up spec landed"
+    assert all(row[bucket].tzinfo is None for row in duck.rows), duck.rows
+    assert all(row[bucket].tzinfo is None for row in post.rows), (
+        "Postgres is timezone-aware again — the CAST in compile.py's _truncand has been lost"
     )
+    assert {r[bucket] for r in duck.rows} == {r[bucket] for r in post.rows}
 
 
 def test_ordering_survives_the_transpile(
@@ -339,3 +318,109 @@ def test_a_write_is_rejected_by_the_server(postgres_adapter: PostgresAdapter) ->
     with pytest.raises(AdapterError) as caught:
         postgres_adapter.execute("CREATE TABLE semantiql_should_never_exist (x int)")
     assert "read-only" in str(caught.value)
+
+
+# --- The server-timezone sweep (spec 011, AD-6).
+
+
+_ZONED_MODEL = """
+version: 1
+datasource: {name: t, dialect: postgres}
+tables:
+  events:
+    source: events
+    dimensions:
+      happened_at: {column: happened_at, type: date%s}
+    measures:
+      n: {column: happened_at, agg: count}
+"""
+
+
+def _dsn_in(dsn: str, timezone: str) -> str:
+    """The same DSN, with the session timezone set through libpq's own `options`.
+
+    Deliberately not `adapter.execute("SET TIME ZONE …")`. `execute` is documented as taking
+    already-validated SQL, and `validate` refuses every non-SELECT — a test that reaches around
+    that to issue a `SET` would be the first caller in the repo to treat the adapter as a
+    general SQL pipe, which is exactly the shortcut `run` exists to prevent. Putting it in the
+    connection string means the adapter opens already in that timezone and nothing is bypassed.
+    """
+    separator = "&" if "?" in dsn else "?"
+    return f"{dsn}{separator}options=-c%20timezone%3D{quote(timezone)}"
+
+
+@pytest.fixture
+def zoned_events(postgres_dsn: str) -> Iterator[str]:
+    """One row two hours past a UTC month boundary — the row a westward server misfiles."""
+    import psycopg
+
+    with psycopg.connect(postgres_dsn) as conn, conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS events")
+        cur.execute("CREATE TABLE events (happened_at timestamptz)")
+        cur.execute("INSERT INTO events VALUES ('2026-07-01T02:00:00+00')")
+        conn.commit()
+    yield postgres_dsn
+
+
+@pytest.mark.parametrize("server_timezone", ["UTC", "America/Chicago", "Asia/Tokyo"])
+def test_a_declared_zone_survives_the_servers_own_timezone(
+    tmp_path: Path, zoned_events: str, server_timezone: str
+) -> None:
+    """**The only test in this repo that can catch this class of fault.**
+
+    Every other control here compares two engines, and this fault is invisible to that: DuckDB
+    and Postgres bucket a timezone-carrying column identically, and both bucket it in the
+    *session's* timezone. They agree, and they are both wrong. What varies is not the engine,
+    it is the machine — so this varies the machine.
+
+    Without the declared zone the bucket moves to June on a server in `America/Chicago`. With
+    it, all three servers answer July, because the model said which zone the month belongs to.
+    """
+    path = tmp_path / "zoned.yml"
+    path.write_text(_ZONED_MODEL % ", timezone: UTC")
+    model = load_model(path)
+
+    adapter = PostgresAdapter(_dsn_in(zoned_events, server_timezone))
+    try:
+        result = _answer("SELECT n, DATE_TRUNC('month', happened_at) FROM events", model, adapter)
+    finally:
+        adapter.close()
+
+    bucket = result.columns.index("happened_at_month")
+    assert str(result.rows[0][bucket])[:10] == "2026-07-01", (
+        f"the month boundary moved on a server set to {server_timezone} — "
+        "the declared zone is not reaching the SQL"
+    )
+
+
+def test_without_a_declaration_the_bucket_is_at_the_servers_mercy(
+    tmp_path: Path, zoned_events: str
+) -> None:
+    """The fault itself, asserted — so the sweep above is measuring something real.
+
+    A test that only proves the fix works can pass on a database where the fault never
+    reproduced. This reproduces it: same row, same grain, no `timezone:`, and the bucket lands
+    in a different month depending on nothing but the server's configuration.
+
+    It is `doctor`'s job to stop a model reaching this state (spec 011, AD-3), and this is what
+    doctor is protecting against.
+    """
+    path = tmp_path / "naive.yml"
+    path.write_text(_ZONED_MODEL % "")
+    model = load_model(path)
+
+    seen = set()
+    for server_timezone in ("UTC", "America/Chicago"):
+        adapter = PostgresAdapter(_dsn_in(zoned_events, server_timezone))
+        try:
+            result = _answer(
+                "SELECT n, DATE_TRUNC('month', happened_at) FROM events", model, adapter
+            )
+        finally:
+            adapter.close()
+        seen.add(str(result.rows[0][result.columns.index("happened_at_month")])[:10])
+
+    assert seen == {"2026-07-01", "2026-06-01"}, (
+        f"expected the bucket to move with the server timezone, got {seen} — if this stops "
+        "reproducing, the sweep above no longer proves the declared zone is doing the work"
+    )

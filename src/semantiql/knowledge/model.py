@@ -8,6 +8,7 @@ surfacing later as a wrong number — N2 applied to configuration.
 from __future__ import annotations
 
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -29,6 +30,42 @@ class Dimension(_Strict):
     type: Literal["string", "date", "number", "boolean"] = "string"
     label: str | None = None
     description: str | None = None
+    timezone: str | None = None
+    """Which timezone a time grain draws its boundaries in. Set it only for a column that
+    stores an instant with a zone (`timestamptz`); leave it off for a `date` or a naive
+    `timestamp`.
+
+    It exists because the answer would otherwise depend on the **database server's** timezone
+    setting, which is invisible to the person reading the number and different on another host
+    (spec 011). Declaring it here puts the choice in git, where it can be reviewed, rather than
+    in an environment nobody diffs.
+
+    Not defaulted to UTC on purpose: "revenue by month in UTC" is a different question from
+    "revenue by month where the business operates", and answering the wrong one plausibly is
+    the failure N2 ranks worst.
+
+    Setting it on a column that carries no zone is worse than leaving it off — it *moves* the
+    buckets rather than pinning them. `semantiql doctor` checks the declaration against the
+    real column in both directions, because `type: date` cannot tell the three apart.
+    """
+
+    @model_validator(mode="after")
+    def _check_timezone(self) -> Dimension:
+        if self.timezone is None:
+            return self
+        if self.type != "date":
+            raise ValueError(
+                f"timezone {self.timezone!r} is set on a {self.type} dimension, but a timezone "
+                "only means something for a date dimension — remove it, or fix `type:`"
+            )
+        try:
+            ZoneInfo(self.timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(
+                f"{self.timezone!r} is not a known IANA timezone ({exc}). Use a region/city "
+                "name such as 'America/Chicago', or 'UTC'."
+            ) from exc
+        return self
 
 
 class Measure(_Strict):

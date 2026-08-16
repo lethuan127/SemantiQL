@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from difflib import get_close_matches
 
 from semantiql.adapters.base import Adapter, AdapterError, Column, ColumnKind
-from semantiql.knowledge.model import Measure, SemanticModel
+from semantiql.knowledge.model import Dimension, Measure, SemanticModel
 
 #: Aggregations that need arithmetic. `count`, `count_distinct`, `min` and `max` apply to
 #: anything, so only these two can be wrong about their column.
@@ -114,6 +114,54 @@ def _check_declared_type(
     )
 
 
+def _check_grain_timezone(
+    entity_name: str, dimension: Dimension, column: Column, table_name: str
+) -> Finding | None:
+    """Does the model's `timezone:` agree with whether the column actually carries one?
+
+    Checked in **both directions**, because both are wrong and the second is worse.
+
+    *Declared nothing over a zoned column.* `DATE_TRUNC` then buckets in the database server's
+    timezone, so the same model over the same rows answers differently on another host. Nobody
+    reading the number can see the setting that produced it.
+
+    *Declared a zone over a column that has none.* This is the direction that surprises people:
+    `AT TIME ZONE` on a naive column does not pin the buckets, it **moves** them — measured on
+    both engines for a `timestamp`, and on DuckDB for a `date`, where the two engines resolve
+    the implicit cast in opposite directions. So a model author trying to do the right thing is
+    the one who breaks their own numbers (spec 011).
+
+    Only `date` dimensions are considered: a grain is refused on anything else upstream, so a
+    timezone could not affect the answer. `other` is silence, as everywhere else here — an
+    adapter that cannot classify a type has said it does not know.
+    """
+    if dimension.type != "date" or column.kind == "other":
+        return None
+    if column.carries_timezone and dimension.timezone is None:
+        return Finding(
+            level="problem",
+            table=table_name,
+            message=(
+                f"dimension {entity_name!r} reads column {column.name!r}, which is "
+                f"{column.native_type} — a time grain on it would bucket in the database "
+                "server's timezone, so the answer changes on another host. Set `timezone:` to "
+                "the zone the buckets belong to"
+            ),
+        )
+    if dimension.timezone is not None and not column.carries_timezone:
+        return Finding(
+            level="problem",
+            table=table_name,
+            message=(
+                f"dimension {entity_name!r} declares timezone {dimension.timezone!r}, but "
+                f"column {column.name!r} is {column.native_type}, which carries no zone — "
+                "applying one would move the grain buckets rather than pin them. Remove "
+                "`timezone:`"
+            ),
+        )
+    return None
+
+
 def _check_aggregation(
     measure_name: str, measure: Measure, column: Column, table_name: str
 ) -> Finding | None:
@@ -192,6 +240,10 @@ def check(model: SemanticModel, adapter: Adapter) -> list[Finding]:
             mistyped = _check_declared_type(name, dimension.type, column, table_name)
             if mistyped is not None:
                 findings.append(mistyped)
+                problems += 1
+            zoned = _check_grain_timezone(name, dimension, column, table_name)
+            if zoned is not None:
+                findings.append(zoned)
                 problems += 1
 
         for name, measure in table.measures.items():

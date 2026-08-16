@@ -81,7 +81,7 @@ sources:
 verified:
   - { by: claude-code/claude-opus-5, at: '2026-08-17T01:40:00+07:00', checkpoint: 2,
       basis: 'map derived from 14 file reads plus a live two-engine probe; all 14 existing-file rows footnoted after a self-audit caught 6 listed without evidence — reading them found that tests/e2e/test_differential.py checks grains against hand-written physical SQL, which the map had called conditional and is in fact certain. AD-4 reverses clarification Q6 on evidence from doctor.py. AD-5 narrows FR-2 and is flagged as the decision most worth overruling; 3 open questions stated, OQ-2 blocking the first implement task' }
-status: draft
+status: stable
 ---
 
 # Constitution check
@@ -152,9 +152,34 @@ database, so this needs no dependency. Validating at load rather than at query t
 where the model's other errors surface, and means a typo'd zone is a model error rather than a
 mystery at 2am.[^model]
 
-**AD-3 — `timezone:` on a non-date dimension is refused at model load.** It means nothing on a
-string or a number, and a key that silently does nothing is how a model grows lies. This is a
-loader check, not a validate check, because it is a property of the model alone.[^model]
+**AD-3 — `timezone:` on a non-date dimension is refused at model load, and `doctor` checks the
+declaration against the physical column in both directions.** The loader half is unchanged: the
+key means nothing on a string or a number, and a key that silently does nothing is how a model
+grows lies. It is a loader check because it is a property of the model alone.[^model]
+
+**The second half was added after T0 measured it**, and it is the reason this AD grew. `AT TIME
+ZONE` is correct **if and only if** the column genuinely carries a timezone:
+
+```
+  column type   postgres                   duckdb
+  timestamptz   stable                     stable
+  timestamp     bucket moves               bucket moves
+  date          stable                     bucket moves
+```
+
+On a `date` the two engines resolve the implicit cast in opposite directions — Postgres to
+`timestamp`, DuckDB to `timestamptz`. So a `timezone:` on the wrong column does not merely fail
+to help: **it introduces the exact fault this spec exists to remove**, and it does so on the
+engine the canonical dialect is modelled on.[^clarifications]
+
+The loader cannot catch that, because `type: date` covers `date`, `timestamp` and `timestamptz`
+alike and the loader never sees the database. So `doctor` validates both directions:
+
+1. column carries a timezone, no `timezone:` declared → problem
+2. `timezone:` declared, column carries none → problem
+
+Direction 2 is not symmetry for its own sake. Without it the declaration is trusted blindly, and
+a model author trying to *do the right thing* is the one who breaks their own numbers.
 
 **AD-4 — `Column.carries_timezone: bool`, not a fifth `ColumnKind`.** Reversed from
 clarification Q6's first answer once `doctor.py` was read: `_check_declared_type` compares
@@ -185,6 +210,13 @@ that `doctor` passes". Not left as an unstated gap. **This is the judgement call
 you overrule one**: the counter-argument is that N2 does not care whose fault the wrong number
 is, and doctor is advisory while the bug is silent. Reversing it means a new spec for the
 round-trip, not a patch to this one.
+
+**Re-examined after T0, and it survives — but only because AD-3 grew.** T0 showed a misplaced
+`timezone:` actively introduces the fault rather than merely failing to prevent it. That would
+have made this trade materially worse than it was accepted on: doctor would be the only thing
+standing between a well-intentioned model author and a wrong number they caused themselves. With
+AD-3's direction-2 check, doctor covers both ways the declaration can disagree with reality, and
+the residual gap is what it always was — *a model nobody ran `doctor` against*.
 
 **AD-6 — the server-timezone sweep is the only test that can catch this class.** A differential
 suite compares two engines; here they agree while both being wrong.[^clarifications] So the new

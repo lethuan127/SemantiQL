@@ -29,8 +29,8 @@ sources:
 verified:
   - { by: claude-code/claude-opus-5, at: '2026-08-17T00:57:34+07:00', checkpoint: 1,
       basis: '9 FRs, each testable. Scope derived from a measured divergence rather than a suspicion — spec 010 ran both engines and recorded the result. FR-3 exists because the self-audit found the differential suite compares one grain of five, so this spec does not inherit an unearned assumption about the other four' }
-status: draft
-sdd_phase: tasking
+status: stable
+sdd_phase: shipped
 sdd_tier: T2
 ---
 
@@ -130,8 +130,12 @@ down because the gap in coverage was real even though the bug behind it was not.
   refused. The current situation, where it is neither, ends.
 - **FR-5** — Where the answer depends on a chosen timezone, that choice is visible in the
   semantic model rather than inherited from the server, and it is reviewable in git.
-- **FR-6** — `semantiql doctor` reports a dimension whose declared type and whose column's
-  timezone-carrying nature would produce configuration-dependent bucketing.
+- **FR-6** — `semantiql doctor` reports a dimension whose declaration and whose column's
+  timezone-carrying nature disagree, **in both directions**:
+  a timezone-carrying column with no `timezone:` declared, **and** a `timezone:` declared over a
+  column that carries none. The second direction was added after the T0 probe measured that
+  `AT TIME ZONE` on a naive column *moves* the bucket — so a misplaced declaration does not
+  merely fail to help, it introduces the fault this spec removes.[^clarifications]
 - **FR-7** — The result a caller receives is of a consistent type across engines for the same
   request, so a client formatting it cannot render two different strings for one answer.
 - **FR-8** — The behaviour that ships today is documented in `docs/`, whichever way FR-2 and

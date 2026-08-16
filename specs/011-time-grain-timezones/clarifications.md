@@ -22,7 +22,7 @@ sources:
     resource: ../../src/semantiql/adapters/base.py
     title: ColumnKind — the four-word vocabulary that cannot currently express "timestamptz"
     last_modified: 2026-08-17
-status: draft
+status: stable
 ---
 
 Every decision below was made **by the agent**, autonomously. Four were settled by running both

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import duckdb
 import pytest
 
 from semantiql.adapters.duckdb import DuckDBAdapter
@@ -124,3 +125,73 @@ def test_several_problems_are_all_reported(tmp_path: Path, duck: DuckDBAdapter) 
         )
     )
     assert len(problems(check(_model(tmp_path, yaml), duck))) == 3
+
+
+# --- Grain timezones (spec 011). Checked in both directions, because both are wrong and the
+# second one surprises people: declaring a zone over a naive column *moves* the buckets.
+
+_ZONED = """
+version: 1
+datasource: {name: t, dialect: duckdb}
+tables:
+  events:
+    source: events
+    dimensions:
+      happened_at: {column: happened_at, type: date%s}
+    measures:
+      n: {column: happened_at, agg: count}
+"""
+
+
+def _events(tmp_path: Path, timezone: str | None, column_type: str) -> tuple[Path, DuckDBAdapter]:
+    """A one-column table of the given physical type, plus a model over it."""
+    database = tmp_path / "events.duckdb"
+    setup = duckdb.connect(str(database))
+    setup.execute(f"CREATE TABLE events (happened_at {column_type})")
+    setup.close()
+    zone = f", timezone: {timezone}" if timezone else ""
+    path = tmp_path / "zoned.yml"
+    path.write_text(_ZONED % zone)
+    return path, DuckDBAdapter(str(database))
+
+
+def test_a_zoned_column_without_a_declaration_is_reported(tmp_path: Path) -> None:
+    """Otherwise the grain buckets in the server's timezone and nobody can see it."""
+    path, adapter = _events(tmp_path, timezone=None, column_type="TIMESTAMPTZ")
+    try:
+        reported = " ".join(f.message for f in problems(check(load_model(path), adapter)))
+    finally:
+        adapter.close()
+    assert "server's timezone" in reported
+    assert "Set `timezone:`" in reported
+
+
+def test_a_declaration_over_a_naive_column_is_reported(tmp_path: Path) -> None:
+    """The direction that surprises people: the declaration *moves* the buckets.
+
+    `AT TIME ZONE` on a column with no zone does not pin anything — measured, it shifts the
+    boundary on both engines. So a model author trying to do the right thing breaks their own
+    numbers, and doctor has to say so.
+    """
+    path, adapter = _events(tmp_path, timezone="America/Chicago", column_type="TIMESTAMP")
+    try:
+        reported = " ".join(f.message for f in problems(check(load_model(path), adapter)))
+    finally:
+        adapter.close()
+    assert "carries no zone" in reported
+    assert "move the grain buckets" in reported
+
+
+@pytest.mark.parametrize(
+    ("timezone", "column_type"),
+    [("UTC", "TIMESTAMPTZ"), (None, "TIMESTAMP"), (None, "DATE")],
+)
+def test_a_matching_declaration_is_silent(
+    tmp_path: Path, timezone: str | None, column_type: str
+) -> None:
+    """All three agreeing combinations. A check that fires on a correct model is noise."""
+    path, adapter = _events(tmp_path, timezone=timezone, column_type=column_type)
+    try:
+        assert problems(check(load_model(path), adapter)) == []
+    finally:
+        adapter.close()

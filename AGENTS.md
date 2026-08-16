@@ -72,7 +72,9 @@ whose type matches the dimension's declared `type`, with the predicate rebuilt f
 rather than carried over (spec 004); and `ORDER BY` over names the request **selects**, plus
 `LIMIT`/`OFFSET` as non-negative whole numbers (spec 005); metrics derived from measures under
 a closed expression grammar (spec 006); and `DATE_TRUNC('<grain>', <date dimension>)` in the
-SELECT list (spec 007). Filtering a measure is refused as needing `HAVING`; ordering by a
+SELECT list (spec 007), truncating a **cast** column so the bucket cannot depend on the database
+server's timezone, or an `AT TIME ZONE` conversion when the dimension declares `timezone:`
+(spec 011). Filtering a measure is refused as needing `HAVING`; ordering by a
 position or an unselected name is refused; and `MONTH()`/`EXTRACT()` are refused because they
 extract a number rather than truncating, which would collapse every July into one row.
 

@@ -17,7 +17,7 @@ sources:
 verified:
   - { by: claude-code/claude-opus-5, at: '2026-08-17T01:50:00+07:00', checkpoint: 3,
       basis: '14 tasks in dependency order; 2 [P] groups checked file-by-file and found disjoint, with CLAUDE.md excluded by name as a symlink. T0 is a blocking measurement rather than code, because OQ-2 would invalidate AD-2 if it failed. T3 and T12 each carry an explicit warning against the shortcut that would destroy the check they exist for' }
-status: draft
+status: stable
 ---
 
 12 tasks plus two gate tasks, derived from the impact map.[^plan] Two `[P]` groups, both checked
@@ -29,7 +29,7 @@ revisiting before anything is written.[^clarifications]
 
 # Phase 0 — resolve the blocking unknown
 
-## T0. Verify `AT TIME ZONE` on DuckDB, end to end
+## ✅ T0. Verify `AT TIME ZONE` on DuckDB, end to end
 
 - **Files:** none — a probe, recorded in the run report
 - **Depends on:** —
@@ -41,10 +41,16 @@ revisiting before anything is written.[^clarifications]
 - **If it fails:** **stop and report.** `AT TIME ZONE` is not a portable fix, AD-2 is wrong, and
   the choice becomes refuse-always or a per-dialect construct — which would be an N4 problem
   worth its own spec.
+- **✅ Result: passed**, and it found a hole. All five grains are affected and all five are fixed
+  by `AT TIME ZONE` on both engines (OQ-2, OQ-3 resolved). But the probe also asked what happens
+  when `AT TIME ZONE` is applied to a column that carries no timezone, and the answer is that it
+  **moves the bucket** — on both engines for a naive `timestamp`, and on DuckDB for a `date`.
+  AD-3 grew a second doctor check in response; T10 below carries it. Full numbers in
+  clarifications Q9.
 
 # Phase 1 — the common case
 
-## T1. Cast inside the truncation
+## ✅ T1. Cast inside the truncation
 
 - **Files:** `src/semantiql/engine/compile.py`
 - **Depends on:** T0
@@ -56,7 +62,7 @@ revisiting before anything is written.[^clarifications]
 - **Constitution check:** N4 — built in canonical SQL, verified to transpile unchanged. No
   adapter learns anything.
 
-## T2. Update the compile assertions
+## ✅ T2. Update the compile assertions
 
 - **Files:** `tests/test_compile.py`
 - **Depends on:** T1
@@ -64,7 +70,7 @@ revisiting before anything is written.[^clarifications]
   to substring-matching to avoid the edit — the exactness is the check.
 - **Verification:** `uv run pytest tests/test_compile.py` green.
 
-## T3. Update the e2e hand-written SQL
+## ✅ T3. Update the e2e hand-written SQL
 
 - **Files:** `tests/e2e/test_differential.py`
 - **Depends on:** T1
@@ -76,10 +82,15 @@ revisiting before anything is written.[^clarifications]
   as before this change.
 - **Constitution check:** N2 — if a total moves, the cast changed an answer that was correct, and
   that is a finding rather than a test to update.
+- **✅ Result: no edit was needed, and the plan over-predicted here.** The e2e differential suite
+  compares **values**, not SQL strings, and the cast is a no-op on DuckDB — so all 27 cases pass
+  untouched, including the year and quarter grains. That is AC-10 satisfied by measurement
+  rather than by inspection: no number moved. Recorded rather than quietly skipped, because a
+  task that turns out to be unnecessary is evidence about the change, not an oversight.
 
 # Phase 2 — the declared case
 
-## T4. `Dimension.timezone`
+## ✅ T4. `Dimension.timezone`
 
 - **Files:** `src/semantiql/knowledge/model.py`
 - **Depends on:** T0
@@ -90,7 +101,7 @@ revisiting before anything is written.[^clarifications]
 - **Constitution check:** N3 — **trust-boundary artifact**, the semantic model schema. The
   timezone becomes a reviewable, diffable model fact rather than a server setting.
 
-## T5. Emit `AT TIME ZONE` when declared
+## ✅ T5. Emit `AT TIME ZONE` when declared
 
 - **Files:** `src/semantiql/engine/compile.py`
 - **Depends on:** T1, T4
@@ -99,7 +110,7 @@ revisiting before anything is written.[^clarifications]
   `relation()` builds rather than interpolates.
 - **Verification:** covered by T6 and T11.
 
-## T6. `[P]` Model and compile tests
+## ✅ T6. `[P]` Model and compile tests
 
 - **Files:** `tests/test_grain_timezones.py` (new)
 - **Depends on:** T4, T5
@@ -110,7 +121,7 @@ revisiting before anything is written.[^clarifications]
 
 # Phase 3 — telling truth from lie
 
-## T7. `Column.carries_timezone`
+## ✅ T7. `Column.carries_timezone`
 
 - **Files:** `src/semantiql/adapters/base.py`
 - **Depends on:** T0
@@ -121,7 +132,7 @@ revisiting before anything is written.[^clarifications]
 - **Constitution check:** N4 — this widens the seam a second time. Recorded as a finding in the
   report, as `close()` was in spec 010.
 
-## T8. `[P]` DuckDB sets it
+## ✅ T8. `[P]` DuckDB sets it
 
 - **Files:** `src/semantiql/adapters/duckdb.py`
 - **Depends on:** T7
@@ -130,7 +141,7 @@ revisiting before anything is written.[^clarifications]
   is not what this changes.
 - **Verification:** `uv run pytest tests/test_adapter_duckdb.py` green, plus a new case.
 
-## T9. `[P]` Postgres sets it
+## ✅ T9. `[P]` Postgres sets it
 
 - **Files:** `src/semantiql/adapters/postgres.py`
 - **Depends on:** T7
@@ -141,21 +152,23 @@ revisiting before anything is written.[^clarifications]
 > **`[P]` group 1 — T8 and T9 touch one adapter each and share nothing.** Both depend on T7's
 > field existing; neither reads the other.
 
-## T10. The doctor finding
+## ✅ T10. The doctor finding
 
 - **Files:** `src/semantiql/doctor.py`, `tests/test_doctor.py`
 - **Depends on:** T8, T9
-- **Do:** `_check_grain_timezone` — a dimension over a `carries_timezone` column with no
-  `timezone:` declared is a **problem**, with a message naming the timezone as the cause and the
-  fix. Wire it into `check()`. **Leave `_check_declared_type` alone** (AD-4).
-- **Verification:** `uv run pytest tests/test_doctor.py` green; the new finding fires and a naive
-  `timestamp` column does not trigger it.
+- **Do:** `_check_grain_timezone`, checking **both directions** (AD-3, extended after T0):
+  (1) column carries a timezone and no `timezone:` is declared → problem;
+  (2) `timezone:` is declared and the column carries none → problem, because `AT TIME ZONE` on a
+  naive column *moves the bucket*. Each message names the timezone as the cause and the fix.
+  Wire it into `check()`. **Leave `_check_declared_type` alone** (AD-4).
+- **Verification:** `uv run pytest tests/test_doctor.py` green; both directions fire; a
+  `timestamptz` column *with* a declaration and a `date` column *without* one are both silent.
 - **Constitution check:** N2 — under AD-5 this check *is* the guarantee for the lying-model case,
   so a false negative here is the whole hole.
 
 # Phase 4 — the tests that can catch this class
 
-## T11. Server-timezone sweep
+## ✅ T11. Server-timezone sweep
 
 - **Files:** `tests/test_postgres_differential.py`
 - **Depends on:** T5, T10
@@ -165,7 +178,7 @@ revisiting before anything is written.[^clarifications]
   both engines agree while both are wrong. Say so in the docstring.
 - **Verification:** green under both session timezones.
 
-## T12. All five grains, plus retire the pinned test
+## ✅ T12. All five grains, plus retire the pinned test
 
 - **Files:** `tests/test_postgres_differential.py`
 - **Depends on:** T11
@@ -173,11 +186,15 @@ revisiting before anything is written.[^clarifications]
   `test_date_trunc_buckets_agree_but_postgres_attaches_a_timezone` and replace it with the real
   assertion: both engines now return the same naive value, so `DATE_TRUNC` rejoins `REQUESTS`
   and needs no special case.
+- **Also:** `tests/e2e/test_postgres_parity.py` holds three grain cases as
+  `xfail(strict=True)` pointing at this spec. `strict` means they **fail the build** once the
+  fix lands — that is the designed signal. Move them from `GRAIN_CASES` into `CASES` and delete
+  the xfail marker in this same change.
 - **Verification:** `uv run pytest -m pg` green; the pinned test no longer exists.
 
 # Phase 5 — derived copies and the gate
 
-## T13. `[P]` Docs
+## ✅ T13. `[P]` Docs
 
 - **Files:** `docs/09-data-modeling.md`, `docs/07-code-map.md`
 - **Depends on:** T12
@@ -188,7 +205,7 @@ revisiting before anything is written.[^clarifications]
 - **Verification:** a reader can tell, from the docs alone, which timezone a month boundary is
   drawn in and what happens when it is not declared.
 
-## T14. `[P]` Agent brief and spec 007
+## ✅ T14. `[P]` Agent brief and spec 007
 
 - **Files:** `AGENTS.md`
 - **Depends on:** T12
@@ -202,14 +219,14 @@ revisiting before anything is written.[^clarifications]
 > `docs/07-code-map.md`} · {`AGENTS.md`}. `CLAUDE.md` is excluded by name, being a symlink to
 > `AGENTS.md`.
 
-## TF. Final verify
+## ✅ TF. Final verify
 
 - **Files:** —
 - **Depends on:** T0–T14
 - **Do:** `./scripts/verify.sh`, with and without a Postgres reachable.
 - **Verification:** green both ways.
 
-## TV. Validation pass
+## ✅ TV. Validation pass
 
 - **Files:** `validation.md`
 - **Depends on:** TF

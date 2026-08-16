@@ -54,17 +54,10 @@ CASES = [
     "SELECT net_revenue, region FROM sales WHERE segment IN ('BUILDING', 'MACHINERY')",
     "SELECT net_revenue, nation FROM sales ORDER BY net_revenue DESC LIMIT 10",
     "SELECT revenue_per_order, region FROM sales",
-]
-
-#: Grains are held separately because they **fail today, for a reason already specced**.
-#: Postgres resolves `date_trunc(text, date)` to its `timestamptz` overload and returns a
-#: timezone-aware value where DuckDB returns a naive one, from byte-identical SQL — spec 011.
-#:
-#: `xfail(strict=True)` rather than deletion or a loosened comparison: deleting them would lose
-#: the coverage, loosening would hide the fault, and `strict` means that when 011 lands these
-#: turn from expected-failure into an outright failure, which is the signal to move them back
-#: into CASES above.
-GRAIN_CASES = [
+    # Grains. These were `xfail(strict=True)` when this suite was written: Postgres returned a
+    # timezone-aware value from byte-identical SQL, so the two engines disagreed. Spec 011 put
+    # a cast in `compile.py`, the strict xfail turned into a hard failure exactly as designed,
+    # and the cases moved here.
     "SELECT net_revenue, DATE_TRUNC('year', order_date) FROM sales",
     "SELECT net_revenue, DATE_TRUNC('quarter', order_date) FROM sales",
     "SELECT net_revenue, DATE_TRUNC('month', order_date) FROM sales",
@@ -137,23 +130,6 @@ def test_both_engines_agree_at_scale(
     e2e_adapter: DuckDBAdapter,
     pg_e2e_adapter: PostgresAdapter,
 ) -> None:
-    _compare(sql, _answer(sql, e2e_model, e2e_adapter), _answer(sql, pg_e2e_model, pg_e2e_adapter))
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="spec 011: Postgres DATE_TRUNC returns a tz-aware value from identical SQL. "
-    "When 011 lands this becomes a hard failure — move these cases back into CASES.",
-)
-@pytest.mark.parametrize("sql", GRAIN_CASES)
-def test_grains_do_not_yet_agree(
-    sql: str,
-    e2e_model: SemanticModel,
-    pg_e2e_model: SemanticModel,
-    e2e_adapter: DuckDBAdapter,
-    pg_e2e_adapter: PostgresAdapter,
-) -> None:
-    """The known divergence, reproduced at TPC-H scale rather than taken on trust."""
     _compare(sql, _answer(sql, e2e_model, e2e_adapter), _answer(sql, pg_e2e_model, pg_e2e_adapter))
 
 

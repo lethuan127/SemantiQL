@@ -134,6 +134,18 @@ class PostgresAdapter:
         return cls._KINDS.get(info.name, "other")
 
     @classmethod
+    def _carries_timezone(cls, oid: int) -> bool:
+        """Only `timestamptz` stores a zone. `timestamp` differs from it by exactly this.
+
+        Both map to kind `date`, which is right for filtering and wrong for grains — see
+        `Column.carries_timezone` for why the distinction is a flag rather than a kind.
+        """
+        info = pg_catalog.types.get(oid)
+        if info is None or info.oid != oid:  # unknown, or the array form
+            return False
+        return info.name == "timestamptz"
+
+    @classmethod
     def _native_type(cls, oid: int) -> str:
         """The type as a DBA would write it, with the array form spelled out."""
         info = pg_catalog.types.get(oid)
@@ -158,6 +170,7 @@ class PostgresAdapter:
                         name=d.name,
                         native_type=self._native_type(d.type_code),
                         kind=self._kind(d.type_code),
+                        carries_timezone=self._carries_timezone(d.type_code),
                     )
                     for d in described
                 ]

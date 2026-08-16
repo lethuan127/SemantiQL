@@ -128,6 +128,7 @@ depending on who asked.
 |---|---|---|---|---|
 | `column` | string | **yes** | — | The physical column name. |
 | `type` | `string` \| `date` \| `number` \| `boolean` | no | `string` | Checked against filter literals — see the note below. |
+| `timezone` | string | no | `null` | IANA zone a **time grain** draws its boundaries in. Set it only on a `date` dimension over a column that stores a zone. See §3.7. |
 | `label` | string | no | `null` | Human-facing name. **Not consumed by any code path yet.** |
 | `description` | string | no | `null` | Meaning and gotchas. **Not consumed by any code path yet.** |
 
@@ -141,6 +142,13 @@ depending on who asked.
 > real schema, so a `date` column declared `type: boolean` loads and returns dates — it will
 > simply refuse the filters that a boolean cannot take. Declaring it correctly matters more
 > than it used to.
+>
+> **`semantiql doctor` is what closes that gap, and for `timezone` it is the only thing that
+> can.** Loading the model cannot tell a `date` from a `timestamp` from a `timestamptz` —
+> `type: date` covers all three, and the loader never sees the database. So the guarantee in
+> §3.7 is precisely: *correct for any model `doctor` passes*. Run it after writing a model,
+> and in your setup script. A model nobody ran it against can still bucket by a timezone
+> nobody chose.
 
 > **`label` and `description` are written but never read.** Grep confirms it: no engine, CLI,
 > or adapter code touches them. They exist because the MCP server — the thing that will
@@ -226,6 +234,41 @@ revenue  order_date_month
 Grains: `year`, `quarter`, `month`, `week`, `day`. The argument must be a dimension declared
 `type: date` — a grain on a string dimension, on a measure, or on another `DATE_TRUNC` is
 refused. The output column is `<dimension>_<grain>` unless you alias it.
+
+#### Time zones, and why a grain has an opinion about them
+
+**If your date column is a plain `date` or a naive `timestamp`, there is nothing to do.** Skip
+this. It is the common case and it needs no `timezone:`.
+
+It matters when the column stores an *instant with a zone* — `timestamptz` in Postgres,
+`TIMESTAMPTZ` in DuckDB. Truncating one of those has to pick a timezone to draw the month
+boundary in, and left alone **both engines pick the database server's**. A row at
+`2026-07-01T02:00:00Z` then lands in July on a server running in UTC and in **June** on one
+running in `America/Chicago`. Same model, same rows, different answer, and nothing in the
+output says which you got.
+
+So declare the zone the buckets belong to:
+
+```yaml
+    dimensions:
+      happened_at:
+        column: happened_at
+        type: date
+        timezone: America/Chicago    # the zone month boundaries are drawn in
+```
+
+It is not defaulted to UTC, deliberately. "Revenue by month in UTC" is a different question
+from "revenue by month where the business operates", and a default would answer one of them
+while looking like it answered the other.
+
+> **Do not set `timezone:` on a column that has no zone.** It is worse than leaving it off: the
+> conversion *moves* the boundaries instead of pinning them — on both engines for a naive
+> `timestamp`, and on DuckDB for a `date`, where the two engines disagree because they resolve
+> the implicit cast in opposite directions. `semantiql doctor` reports both mistakes: a zoned
+> column with no declaration, and a declaration over a column with no zone.
+
+An unknown zone is a load error, so `America/Chigago` fails immediately rather than at 2am.
+Use region/city names.
 
 > **`MONTH(order_date)` is refused, and this is the reason.** It extracts the month *number*,
 > so `MONTH(DATE '2026-07-15')` and `MONTH(DATE '2025-07-02')` are both `7`. Group by it across

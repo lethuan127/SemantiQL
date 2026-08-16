@@ -35,7 +35,7 @@ from semantiql.engine.validate import (
     ValidRequest,
 )
 from semantiql.knowledge.expression import BinOp, MetricExpr, Neg, Num, Ref
-from semantiql.knowledge.model import Measure, SemanticModel, Table
+from semantiql.knowledge.model import Dimension, Measure, SemanticModel, Table
 
 CANONICAL_DIALECT = "duckdb"
 
@@ -158,6 +158,38 @@ def _aggregate(measure: Measure, alias: str) -> exp.Expr:
     return exp.alias_(_aggregation(measure), alias)
 
 
+def _truncand(dimension: Dimension) -> exp.Expr:
+    """What `DATE_TRUNC` is applied to. Never the bare column — that is the whole point.
+
+    Truncating a bare column makes the answer depend on the **database server's timezone**, and
+    both engines do it, so a differential test cannot catch it (spec 011). A row at
+    `2026-07-01T02:00:00Z` buckets into July on a server in UTC and into June on one in
+    `America/Chicago`. The user sees neither the setting nor the difference.
+
+    Two shapes, and which one is correct depends entirely on whether the column carries a zone:
+
+    - **No `timezone:` declared** — the column is a `date` or a naive `timestamp`, so there is
+      no zone to honour and none should be invented. `CAST(… AS TIMESTAMP)` pins it. On DuckDB
+      that is a no-op; on Postgres it is load-bearing, because `date_trunc(text, date)` resolves
+      to the `timestamptz` overload and drags the session timezone in. Delete the cast and
+      Postgres starts answering differently from DuckDB, and differently from itself on another
+      host.
+
+    - **`timezone:` declared** — the column carries a zone, and the model says which zone the
+      buckets belong to. `AT TIME ZONE` converts once, explicitly, to that zone.
+
+    Applying the wrong shape is not a missed optimisation, it is the bug: measured, `AT TIME
+    ZONE` over a naive column *moves the bucket* on both engines, and over a `date` the two
+    engines disagree because they resolve the implicit cast in opposite directions. Nothing here
+    can tell the physical type — `type: date` covers all three — so `doctor` checks the
+    declaration against the real column, in both directions.
+    """
+    column = exp.column(dimension.column)
+    if dimension.timezone is None:
+        return exp.cast(column, "TIMESTAMP")
+    return exp.AtTimeZone(this=column, zone=exp.Literal.string(dimension.timezone))
+
+
 def compile_request(
     request: ValidRequest,
     model: SemanticModel,
@@ -188,7 +220,7 @@ def compile_request(
             dimension = table.dimensions[item.entity]
             built = exp.column(dimension.column)
             if item.grain is not None:
-                built = exp.TimestampTrunc(this=built, unit=exp.var(item.grain))
+                built = exp.TimestampTrunc(this=_truncand(dimension), unit=exp.var(item.grain))
             grouping.append(built)
             projections.append(exp.alias_(built, item.output))
 
