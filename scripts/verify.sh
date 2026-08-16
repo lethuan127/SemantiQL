@@ -41,7 +41,7 @@ uv run pytest -m "not e2e and not pg" || fail "pytest"
 # repository — with no network on a first run the suite skips and this step still passes,
 # because the README promises a clone that runs without one.
 step "end-to-end (pytest -m e2e)"
-uv run pytest -m e2e || fail "end-to-end tests"
+uv run pytest -m "e2e and not pg" || fail "end-to-end tests"
 
 # The differential suite answers the same question on DuckDB and on Postgres and fails if the
 # two disagree — the one check that can catch a dialect bug producing a plausible wrong number.
@@ -51,7 +51,7 @@ uv run pytest -m e2e || fail "end-to-end tests"
 #
 #   docker run --rm -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17
 #   SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@localhost/postgres ./scripts/verify.sh
-step "postgres differential (pytest -m pg)"
+step "postgres, incl. TPC-H parity (pytest -m pg)"
 uv run pytest -m pg || fail "postgres differential tests"
 
 # The change records under specs/ are an OKF bundle; conformance errors are failures.

@@ -182,3 +182,59 @@ worse than the bug.
 [^model]: `src/semantiql/knowledge/model.py` — `Dimension` and its `type` Literal at line 29.
 [^compile]: `src/semantiql/engine/compile.py` — `exp.TimestampTrunc` over the bare column at line 191.
 [^base]: `src/semantiql/adapters/base.py` — `Column` and the `ColumnKind` vocabulary.
+
+## Q9: T0 results — is `AT TIME ZONE` a safe fix? (measured after the plan was written)
+
+Run as the plan's blocking task T0, before any code. Two questions were asked; the second was
+not on the list and is the one that matters.
+
+**T0 proper — does `AT TIME ZONE 'UTC'` hold on DuckDB, for all five grains?** Yes, and it also
+settles OQ-3. Each grain was tested with a row placed just past that grain's UTC boundary, so a
+westward server pulls it into the previous bucket:
+
+```
+  grain    bare DATE_TRUNC across UTC / Chicago / Tokyo      AT TIME ZONE 'UTC'
+  year     2026-01-01  2025-01-01  2026-01-01   moved        stable, both engines
+  quarter  2026-07-01  2026-04-01  2026-07-01   moved        stable, both engines
+  month    2026-07-01  2026-06-01  2026-07-01   moved        stable, both engines
+  week     2026-07-06  2026-06-29  2026-07-06   moved        stable, both engines
+  day      2026-07-01  2026-06-30  2026-07-01   moved        stable, both engines
+```
+
+So **all five grains are affected**, not just `month`, and identically on both engines — and all
+five are fixed. OQ-2 and OQ-3 both resolve yes. `exp.AtTimeZone` also builds and renders
+identically on both dialects, so AD-1 and AD-2 are constructible as planned.
+
+**The unasked question — what if `AT TIME ZONE` is applied to a column that does *not* carry a
+timezone?** The plan branches on the model's `timezone:` key, not on the physical type, so
+nothing currently stops that. Measured:
+
+```
+  input type    engine     UTC                        America/Chicago            stable?
+  date          postgres   2026-07-01 00:00:00        2026-07-01 00:00:00        yes
+  date          duckdb     2026-07-01 00:00:00+00:00  2026-06-01 00:00:00-05:00  NO
+  timestamp     postgres   2026-07-01 00:00:00+00:00  2026-06-01 00:00:00-05:00  NO
+  timestamp     duckdb     2026-07-01 00:00:00+00:00  2026-06-01 00:00:00-05:00  NO
+  timestamptz   both       2026-07-01 00:00:00        2026-07-01 00:00:00        yes
+```
+
+**`AT TIME ZONE` is correct if and only if the column genuinely carries a timezone.** On a naive
+`timestamp` it moves the bucket on *both* engines. On a `date` the two engines resolve the
+implicit cast in **opposite directions** — Postgres to `timestamp`, DuckDB to `timestamptz` — so
+DuckDB moves the bucket and Postgres does not.
+
+The consequence is sharp enough to state on its own: **a well-meant `timezone:` on the wrong
+column introduces the exact bug this spec exists to remove.** The fix becomes a new instance of
+the fault. Nothing in the plan as written prevents it — AD-3 refuses `timezone:` on a non-*date*
+dimension, and a `date` dimension over a physical `timestamp` column is precisely the hole.
+
+**Proposed response, pending approval — the plan is not yet amended.** `doctor` gains the
+*mirror* of the check already planned, so it validates both directions:
+
+1. column carries a timezone, no `timezone:` declared → problem *(already planned)*
+2. `timezone:` declared, column does **not** carry a timezone → problem *(new, from this probe)*
+
+Check 2 is not tidiness. Without it the declaration is trusted blindly, and AD-5's known gap —
+"the guarantee holds for any model doctor passes" — stops being a gap in *detection* and becomes
+a way to actively introduce the fault. That is a materially worse trade than AD-5 was accepted
+on, so it is being raised rather than absorbed.
