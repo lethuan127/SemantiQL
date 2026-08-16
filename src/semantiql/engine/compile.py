@@ -34,9 +34,16 @@ from semantiql.engine.validate import (
     Predicate,
     ValidRequest,
 )
+from semantiql.knowledge.expression import BinOp, MetricExpr, Neg, Num, Ref
 from semantiql.knowledge.model import Measure, SemanticModel, Table
 
 CANONICAL_DIALECT = "duckdb"
+
+_ARITHMETIC: dict[str, type[exp.Binary]] = {
+    "+": exp.Add,
+    "-": exp.Sub,
+    "*": exp.Mul,
+}
 
 _COMPARISON: dict[str, type[exp.Binary]] = {
     "=": exp.EQ,
@@ -99,15 +106,56 @@ def _predicate(predicate: Predicate, table: Table) -> exp.Expr:
     return _COMPARISON[predicate.operator](this=column, expression=values[0])
 
 
-def _aggregate(measure: Measure, alias: str) -> exp.Expr:
-    """Render a measure as its one sanctioned aggregation."""
+def _metric(node: MetricExpr, table: Table) -> exp.Expr:
+    """Build a metric from the aggregations of the measures it names.
+
+    The substitution order is what makes the number right. Each `Ref` becomes that measure's
+    sanctioned aggregation, so `revenue / order_count` compiles to `SUM(amount) /
+    COUNT(order_id)` — one division, applied *after* the grouping, over each group's own
+    parts. Dividing row by row and averaging the results is a different and wrong number, and
+    nothing in the answer would show which one you got.
+
+    Every divisor is wrapped in `NULLIF(…, 0)`, and that is not defensive tidying. DuckDB
+    evaluates `1/0` to `inf` and hands it back as a value; Postgres raises. Unguarded, the
+    same model would report a meaningless figure on one engine and fail on the other. NULL is
+    the honest answer for a ratio with nothing to divide by.
+    """
+    if isinstance(node, Ref):
+        measure = table.measures[node.measure]
+        return _aggregation(measure)
+    if isinstance(node, Num):
+        return exp.Literal.number(node.value)
+    if isinstance(node, Neg):
+        return exp.Neg(this=_grouped(node.operand, table))
+
+    left = _grouped(node.left, table)
+    right = _grouped(node.right, table)
+    if node.op == "/":
+        return exp.Div(this=left, expression=exp.func("NULLIF", right, exp.Literal.number(0)))
+    return _ARITHMETIC[node.op](this=left, expression=right)
+
+
+def _grouped(node: MetricExpr, table: Table) -> exp.Expr:
+    """An operand, parenthesised only where precedence could change the number.
+
+    A leaf needs no parentheses and reads better without them, and the emitted SQL is meant to
+    be read — `--show-sql` exists so a reviewer can check the work.
+    """
+    built = _metric(node, table)
+    return exp.paren(built) if isinstance(node, BinOp | Neg) else built
+
+
+def _aggregation(measure: Measure) -> exp.Expr:
+    """A measure's sanctioned aggregation, unaliased."""
     column = exp.column(measure.column)
-    agg: exp.Expr
     if measure.agg == "count_distinct":
-        agg = exp.Count(this=exp.Distinct(expressions=[column]))
-    else:
-        agg = _AGG[measure.agg](this=column)
-    return exp.alias_(agg, alias)
+        return exp.Count(this=exp.Distinct(expressions=[column]))
+    return _AGG[measure.agg](this=column)
+
+
+def _aggregate(measure: Measure, alias: str) -> exp.Expr:
+    """Render a measure as its one sanctioned aggregation, aliased for the caller."""
+    return exp.alias_(_aggregation(measure), alias)
 
 
 def compile_request(
@@ -127,7 +175,10 @@ def compile_request(
     # columns it asked for, in the order it asked for them.
     projections: list[exp.Expr] = []
     for item in request.projections:
-        if item.entity in table.measures:
+        if item.entity in table.metrics:
+            built = _metric(table.expression_for(item.entity), table)
+            projections.append(exp.alias_(built, item.output))
+        elif item.entity in table.measures:
             projections.append(_aggregate(table.measures[item.entity], item.output))
         else:
             dimension = table.dimensions[item.entity]

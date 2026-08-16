@@ -72,6 +72,7 @@ Four levels, and each has exactly one job:
 | `tables.<name>` | one physical relation, exposed under a business name |
 | `dimensions` | the things you can slice by — become `SELECT` columns and the `GROUP BY` |
 | `measures` | the things you can count — become the aggregate in the `SELECT` |
+| `metrics` | numbers derived from those measures — a ratio, a share, a difference (§3.6) |
 
 ---
 
@@ -112,13 +113,14 @@ this project actually has adapters for. `dialect: mysql` fails to load, by desig
 | `source` | string | **yes** | — | The physical relation. See §5. |
 | `dimensions` | mapping of name → dimension | no | `{}` | |
 | `measures` | mapping of name → measure | no | `{}` | A table with no measures loads, but every query against it is refused (§4.4). |
+| `metrics` | mapping of name → metric | no | `{}` | Derived numbers — see §3.6. |
 
 The mapping **key** is the semantic name — what the AI writes. It is yours to choose and it
 does not have to resemble the physical column.
 
-A name defined as both a dimension and a measure on the same table is rejected at load
-(`model.py:48`): the two would resolve inconsistently, so the same word would mean two
-different things depending on who asked.
+A name defined twice across dimensions, measures and metrics on the same table is rejected at
+load: they would resolve inconsistently, so the same word would mean two different things
+depending on who asked.
 
 ### 3.4 `dimensions.<name>` — `Dimension` (`model.py:23`)
 
@@ -159,6 +161,53 @@ There is no `type` on a measure and no per-measure filter. A measure is exactly 
 and one aggregation.
 
 ---
+
+### 3.6 `metrics.<name>` — `Metric`
+
+A number derived from this table's measures: a ratio, a share, a difference.
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `expression` | string | **yes** | — | Over this table's **measures** — see the grammar below. |
+| `label` | string | no | `null` | Not consumed yet. |
+| `description` | string | no | `null` | Not consumed yet. |
+
+```yaml
+metrics:
+  revenue_per_order:
+    expression: revenue / order_count
+  margin_pct:
+    expression: (revenue - cost) / revenue * 100
+```
+
+**The grammar is closed:** measure names of the same table, numbers, `+ - * /`, unary minus,
+and parentheses. Nothing else. A function, a raw `SUM(...)`, a dimension, another metric, or
+an unknown name is rejected **when the model loads**, with a message naming the offender —
+not later, when someone finally asks for it.
+
+Two consequences worth understanding before you write one:
+
+**A metric is computed after grouping, from each group's own parts.** `revenue_per_order` for
+the web channel is web's revenue over web's order count. It compiles to a single division of
+two aggregates:
+
+```
+SELECT SUM(amount) / NULLIF(COUNT(order_id), 0) AS revenue_per_order, channel AS channel
+  FROM … GROUP BY channel
+```
+
+That is *not* the same as averaging a row-level ratio, and the difference is invisible in the
+answer. Anything that needs the row-level form belongs in a database view, exposed as its own
+measure.
+
+**Every divisor is guarded.** `NULLIF(divisor, 0)` is inserted automatically, so a group with
+nothing to divide by reports no value. That is not tidiness: DuckDB evaluates `1/0` to **`inf`**
+and returns it as a figure, while Postgres raises `division by zero` — so the same model,
+unguarded, would give a meaningless number on one engine and an error on the other. A divisor
+written as a literal zero is refused at load instead.
+
+**Metrics compose from measures, not from other metrics.** No cycles to reason about. If two
+metrics share a part, name that part as a measure.
 
 ## 4. Aggregations
 
@@ -348,8 +397,9 @@ Not expressible in the model today:
   model itself cannot declare one: no default filter on a table, no filter baked into a
   measure. Filtering on a measure — `WHERE revenue > 1000`, which SQL would express as
   `HAVING` — is refused.
-- **Derived or ratio metrics.** No `SUM(x) / COUNT(y)`, no measure referencing another
-  measure, no expression as a `column`.
+- **Expressions as a measure's `column`.** A measure is one raw column and one aggregation.
+  Ratios and differences between measures *are* expressible — as metrics (§3.6) — but a metric
+  may not reference another metric, and neither may contain a function or an aggregation.
 - **Joins and relationships.** One table per request, and no way to declare that `orders`
   relates to `customers`. Multi-table requests are refused.
 - **Virtual views.** No model-defined view composed from other model entities. The
@@ -614,6 +664,9 @@ An unsupported `agg:` fails at load:
 For anything in the lower half of that table: compute it in a database view, expose the
 result as a column, and model a `sum`/`min`/`max` over it — accepting that the definition now
 lives in the warehouse rather than in the diffable YAML.
+
+**A ratio does not need a new aggregation.** `SUM(x) / SUM(y)` is a **metric** (§3.6), not a
+missing `agg` value: define both parts as measures and divide them in the model.
 
 ### A.5 Scalar functions, expressions, and operators
 

@@ -307,10 +307,12 @@ def _filtered_dimension(node: exp.Expr, table: Table, table_name: str) -> str | 
             f"left — but the left side here is {_predicate_label(node)}."
         )
     name = node.name
-    if name in table.measures:
+    if name in table.measures or name in table.metrics:
+        kind = "measure" if name in table.measures else "metric"
         return Refusal(
-            f"{name!r} is a measure, so filtering on it would need HAVING, which is not "
-            "supported. Filter on a dimension instead; measures are what the request computes."
+            f"{name!r} is a {kind}, so filtering on it would need HAVING, which is not "
+            "supported. Filter on a dimension instead; a "
+            f"{kind} is what the request computes."
         )
     if name not in table.dimensions:
         return Refusal(
@@ -581,7 +583,9 @@ def validate(sql: str, model: SemanticModel) -> ValidRequest | Refusal:
                 f"{item.entity!r} is not defined on table {table_name!r}.",
                 _suggest(item.entity, table.entity_names),
             )
-        if item.entity in table.measures:
+        # A metric computes a number the same way a measure does, so it counts as one here
+        # and is likewise not a grouping key.
+        if item.entity in table.measures or item.entity in table.metrics:
             measures.append(item.entity)
         else:
             dimensions.append(item.entity)
@@ -589,7 +593,7 @@ def validate(sql: str, model: SemanticModel) -> ValidRequest | Refusal:
     if not measures:
         return Refusal(
             "The request selects no measure, so there is no number to compute. "
-            f"Measures on {table_name!r}: {', '.join(sorted(table.measures)) or 'none'}."
+            f"Measures on {table_name!r}: {', '.join(table.computed_names) or 'none'}."
         )
 
     where = parsed.args.get("where") or parsed.args.get("where_")

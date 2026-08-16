@@ -44,3 +44,14 @@ tables:
         column: amount
         agg: avg
         label: Average order value
+
+    metrics:
+      # A metric is derived from the measures above, so its definition lives here rather than
+      # in a query or a client. The division is guarded when it compiles: a period with no
+      # orders reports no value instead of `inf`.
+      revenue_per_order:
+        expression: revenue / order_count
+        label: Revenue per order
+        description: >-
+          Revenue divided by order lines, computed after grouping — so revenue per order for
+          a channel uses that channel's own revenue and its own count.

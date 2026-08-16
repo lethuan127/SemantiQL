@@ -1,6 +1,13 @@
 # Update Log
 
 ## 2026-08-16
+* **Update**: Shipped 006 — 7 of 7 tasks; metrics derived from measures with a closed grammar validated at load, every divisor guarded with NULLIF because DuckDB returns `inf` for 1/0, 19 new test cases, verify gate green at 176 tests. Layer 1 now has the metrics its own architecture doc has always described [006](/006-derived-metrics/spec.md)
+* **Update**: Task list drafted for 006 — 7 tasks, one [P] pair for the derived copies [006](/006-derived-metrics/tasks.md)
+* **Creation**: Plan and impact map drafted for 006 — new `knowledge/expression.py` holds the metric IR and its closed-grammar parser; metrics validate at load and compile to guarded aggregate expressions. 10 files to modify, 1 to add [006](/006-derived-metrics/plan.md)
+* **Update**: Clarified 4 ambiguities for 006 — expression string over structured YAML; guard every divisor because DuckDB returns `inf` for 1/0 while Postgres raises; measures only, no metric-in-metric; validate at load, not at query time [006](/006-derived-metrics/clarifications.md)
+* **Creation**: Spec drafted for derived metrics — ratios defined in the model, computed after grouping, closing the gap between layer 1's description and the code [006](/006-derived-metrics/spec.md)
+
+## 2026-08-16
 * **Update**: Shipped 005 — 6 of 6 tasks; ORDER BY over projected names, LIMIT/OFFSET as whole numbers, 25 new test cases, verify gate green at 157 tests. The transpile tripwire was replaced by a real T-SQL-vs-DuckDB assertion, as its own docstring instructed — N4 is now verified for behaviour, not only for imports [005](/005-order-and-limit/spec.md)
 * **Update**: Task list drafted — 6 tasks, one [P] pair for the derived copies [005](/005-order-and-limit/tasks.md)
 * **Creation**: Plan and impact map drafted — extend `_SELECT_ARGS` to order/limit/offset, order by the output alias, and replace the transpile tripwire with a real T-SQL-vs-DuckDB assertion. 7 files to modify, 0 to add [005](/005-order-and-limit/plan.md)

@@ -127,3 +127,45 @@ def test_offset_skips_the_top(model: SemanticModel, adapter: DuckDBAdapter) -> N
         adapter,
     )
     assert result.rows[0][result.columns.index("channel")] == "partner"
+
+
+# --- Metrics (spec 006). Each ratio is computed from the corpus independently, because the
+# failure this guards against — a ratio taken at the wrong grain — produces a plausible
+# number rather than an error.
+
+EXPECTED_RATIO_BY_CHANNEL = {"web": 191.30, "retail": 114.83, "partner": 192.625}
+
+
+def test_a_metric_is_computed_per_group(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    """Each channel's own revenue over its own count — not an average of row-level ratios."""
+    result = _result("SELECT revenue_per_order, channel FROM orders", model, adapter)
+    channel = result.columns.index("channel")
+    ratio = result.columns.index("revenue_per_order")
+    got = {str(row[channel]): round(float(row[ratio]), 4) for row in result.rows}
+    assert got == EXPECTED_RATIO_BY_CHANNEL
+
+
+def test_a_metric_agrees_with_its_parts(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    """The definition is revenue / order_count, so the answer must equal exactly that."""
+    parts = _result("SELECT revenue, order_count FROM orders", model, adapter).rows[0]
+    ratio = _result("SELECT revenue_per_order FROM orders", model, adapter).rows[0][0]
+    assert round(float(ratio), 6) == round(float(parts[0]) / float(parts[1]), 6)
+
+
+def test_an_empty_denominator_yields_no_value_not_infinity(
+    model: SemanticModel, adapter: DuckDBAdapter
+) -> None:
+    """Unguarded, DuckDB would answer `inf` here and Postgres would raise (spec 006, Q2)."""
+    result = _result(
+        "SELECT revenue_per_order FROM orders WHERE channel = 'nothing at all'", model, adapter
+    )
+    assert result.rows[0][0] is None
+
+
+def test_a_metric_can_be_ordered_by(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    result = _result(
+        "SELECT revenue_per_order, channel FROM orders ORDER BY revenue_per_order DESC LIMIT 1",
+        model,
+        adapter,
+    )
+    assert result.rows[0][result.columns.index("channel")] == "partner"

@@ -305,3 +305,18 @@ def test_ordering_by_an_unselected_name_suggests_one_that_works(model: SemanticM
 )
 def test_every_supported_ordering_validates(sql: str, model: SemanticModel) -> None:
     assert isinstance(validate(sql, model), ValidRequest), f"refused a supported ordering: {sql}"
+
+
+def test_filtering_on_a_metric_is_refused(model: SemanticModel) -> None:
+    """Same reasoning as a measure: that is HAVING, and HAVING is not supported."""
+    outcome = run(
+        "SELECT revenue FROM orders WHERE revenue_per_order > 1", model, ExplodingAdapter()
+    )
+    assert isinstance(outcome, Refusal)
+    assert "HAVING" in outcome.reason
+    assert "metric" in outcome.reason
+
+
+def test_a_metric_alone_computes_a_number(model: SemanticModel) -> None:
+    """A request selecting only a metric is answerable — it computes something."""
+    assert isinstance(validate("SELECT revenue_per_order FROM orders", model), ValidRequest)

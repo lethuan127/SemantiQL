@@ -12,7 +12,8 @@ Humans: [CONTRIBUTING.md](CONTRIBUTING.md) covers the same ground with more cont
 
 SemantiQL sits between an LLM and a SQL database. The model writes **semantic SQL** against
 a business model — dimensions, measures, metrics — and SemantiQL validates it, compiles it
-to physical SQL, and runs it. Four layers, described in
+to physical SQL, and runs it. All three exist in the model today; metrics are derived from
+measures under a closed expression grammar, checked when the model loads (spec 006). Four layers, described in
 [docs/02-architecture.md](docs/02-architecture.md) and mapped to modules in
 [docs/07-code-map.md](docs/07-code-map.md).
 

@@ -17,4 +17,5 @@ bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md)
 * [003-refuse-unimplemented-constructs/](003-refuse-unimplemented-constructs/) - T2, shipped - close the silent-drop gap — TABLESAMPLE and PIVOT are accepted and dropped today; make refusal the default for anything unimplemented
 * [004-filter-by-dimension/](004-filter-by-dimension/) - T2, shipped - support WHERE over model dimensions with typed literals, rebuilt from the model
 * [005-order-and-limit/](005-order-and-limit/) - T2, shipped - ORDER BY over projected names plus LIMIT/OFFSET, and the first real transpile assertion
+* [006-derived-metrics/](006-derived-metrics/) - T2, shipped - metrics derived from measures, with a closed expression grammar and a guarded divisor
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above

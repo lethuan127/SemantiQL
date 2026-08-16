@@ -59,3 +59,77 @@ def test_bad_aggregation_is_rejected(tmp_path: Path) -> None:
     )
     with pytest.raises(ModelError, match="agg"):
         load_model(m)
+
+
+# --- Metrics (spec 006). The expression is checked when the model loads, so a typo in a
+# metric nobody has queried yet is still an error you see immediately.
+
+_HEAD = (
+    "version: 1\n"
+    "datasource: {name: t, dialect: duckdb}\n"
+    "tables:\n"
+    "  orders:\n"
+    "    source: x.csv\n"
+    "    dimensions: {channel: {column: channel}}\n"
+    "    measures:\n"
+    "      revenue: {column: amount, agg: sum}\n"
+    "      order_count: {column: order_id, agg: count}\n"
+)
+
+
+def _with_metric(tmp_path: Path, body: str) -> Path:
+    m = tmp_path / "m.yml"
+    m.write_text(_HEAD + "    metrics:\n" + body)
+    return m
+
+
+def test_a_metric_loads(tmp_path: Path) -> None:
+    model = load_model(_with_metric(tmp_path, "      rpo: {expression: revenue / order_count}\n"))
+    orders = model.table("orders")
+    assert orders is not None
+    assert orders.metrics["rpo"].expression == "revenue / order_count"
+    assert "rpo" in orders.entity_names
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("revenue / nope", "not a measure"),
+        ("channel / revenue", "not a measure"),  # a dimension is not a measure
+        ("SUM(amount)", "aggregate"),
+        ("UPPER(revenue)", "function"),
+        ("revenue / 0", "divides by zero"),
+        ("revenue >", "not a valid expression"),
+    ],
+)
+def test_a_metric_expression_is_checked_at_load(
+    expression: str, expected: str, tmp_path: Path
+) -> None:
+    path = _with_metric(tmp_path, f"      bad: {{expression: '{expression}'}}\n")
+    with pytest.raises(ModelError) as exc:
+        load_model(path)
+    assert expected in str(exc.value), exc.value
+
+
+def test_a_metric_may_not_reference_another_metric(tmp_path: Path) -> None:
+    """Measures only — so there are no cycles to detect, and the refusal says why."""
+    path = _with_metric(
+        tmp_path,
+        "      rpo: {expression: revenue / order_count}\n      doubled: {expression: rpo * 2}\n",
+    )
+    with pytest.raises(ModelError, match="not a measure"):
+        load_model(path)
+
+
+@pytest.mark.parametrize(
+    "clash",
+    [
+        "    metrics: {revenue: {expression: revenue}}\n",
+        "    metrics: {channel: {expression: revenue}}\n",
+    ],
+)
+def test_a_name_is_at_most_one_kind(clash: str, tmp_path: Path) -> None:
+    m = tmp_path / "m.yml"
+    m.write_text(_HEAD + clash)
+    with pytest.raises(ModelError, match="exactly one"):
+        load_model(m)

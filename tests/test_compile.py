@@ -233,3 +233,41 @@ def test_ordering_names_the_output_column_not_the_aggregate(model: SemanticModel
         dialect="duckdb",
     )
     assert "ORDER BY total DESC" in compiled, compiled
+
+
+# --- Metrics (spec 006).
+
+
+def test_a_metric_becomes_its_measures_aggregations(model: SemanticModel) -> None:
+    compiled = compile_request(
+        _valid("SELECT revenue_per_order FROM orders", model),
+        model,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    assert "SUM(amount)" in compiled, compiled
+    assert "COUNT(order_id)" in compiled, compiled
+
+
+def test_every_divisor_is_guarded(model: SemanticModel) -> None:
+    """DuckDB evaluates 1/0 to `inf` and Postgres raises, so an unguarded ratio is both a
+    wrong number and an engine-dependent one."""
+    compiled = compile_request(
+        _valid("SELECT revenue_per_order FROM orders", model),
+        model,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    assert "NULLIF(COUNT(order_id), 0)" in compiled, compiled
+
+
+def test_a_metric_does_not_add_a_grouping(model: SemanticModel) -> None:
+    """The ratio is computed from each group's own parts, so it is not itself a key."""
+    compiled = compile_request(
+        _valid("SELECT revenue_per_order, channel FROM orders", model),
+        model,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    assert compiled.count("GROUP BY") == 1
+    assert "GROUP BY channel" in compiled, compiled
