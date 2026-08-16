@@ -209,6 +209,45 @@ written as a literal zero is refused at load instead.
 **Metrics compose from measures, not from other metrics.** No cycles to reason about. If two
 metrics share a part, name that part as a measure.
 
+### 3.7 Time grains
+
+A `date` dimension can be asked for at a coarser grain, in the request rather than the model:
+
+```
+SELECT revenue, DATE_TRUNC('month', order_date) FROM orders
+```
+
+```
+revenue  order_date_month
+1491.74  2026-07-01
+194.5    2026-08-01
+```
+
+Grains: `year`, `quarter`, `month`, `week`, `day`. The argument must be a dimension declared
+`type: date` — a grain on a string dimension, on a measure, or on another `DATE_TRUNC` is
+refused. The output column is `<dimension>_<grain>` unless you alias it.
+
+> **`MONTH(order_date)` is refused, and this is the reason.** It extracts the month *number*,
+> so `MONTH(DATE '2026-07-15')` and `MONTH(DATE '2025-07-02')` are both `7`. Group by it across
+> two years and both Julys merge into a single row: the total is a real sum of real rows, the
+> label reads `7`, and nothing in the answer shows that two years were added together. That is
+> the exact class of failure this engine refuses, so `MONTH`, `YEAR`, `QUARTER`, `DAY`, `WEEK`
+> and `EXTRACT` come back with a message naming the `DATE_TRUNC` form instead.
+
+The grain is also where the transpiler does its most visible work — one canonical statement,
+four spellings:
+
+| dialect | rendering |
+|---|---|
+| DuckDB, Postgres | `DATE_TRUNC('MONTH', order_date)` |
+| BigQuery | `TIMESTAMP_TRUNC(order_date, MONTH)` |
+| T-SQL | `DATETRUNC(MONTH, order_date)` |
+| MySQL | a `DATE_ADD` / `TIMESTAMPDIFF` construction |
+
+Two limits worth stating: you cannot filter on a truncated value (`WHERE DATE_TRUNC(…) = …`) —
+filter the date dimension with a range instead — and there are no sub-day grains, because the
+model's `date` type carries no time.
+
 ## 4. Aggregations
 
 Six, defined as a closed enum at `model.py:14` and rendered at `compile.py:33-50`. The list
@@ -404,9 +443,9 @@ Not expressible in the model today:
   relates to `customers`. Multi-table requests are refused.
 - **Virtual views.** No model-defined view composed from other model entities. The
   equivalent today is a database view, referenced through `source`.
-- **Time grains.** No `month`/`quarter` derivation on a `date` dimension. `type: date` is a
-  declaration, not a truncation. This is also why the transpile step is currently untested
-  in anger — nothing the engine emits is dialect-specific yet (`test_compile.py:57`).
+- **Grains declared in the model.** A request may ask for a coarser grain (A.2), but the
+  model cannot predeclare `order_month` as its own dimension. If you want that, build it as a
+  column in a database view.
 - **Synonyms or aliases for entities**, formatting hints, units, or currency.
 - **Row-level security, masking, or access control.** That is layer 3, deliberately
   unimplemented ([07-code-map.md](07-code-map.md)).
@@ -595,6 +634,8 @@ warnings: a dropped `WHERE` returns a grand total that looks exactly like a filt
 | `FROM main.orders`, `FROM orders AS o` | ✅ | catalog/schema prefix and table alias are ignored, not honoured |
 | `WHERE` over dimensions | ✅ | `=` `<>` `<` `<=` `>` `>=` `IN` `NOT IN` `BETWEEN` `LIKE` `NOT LIKE` `IS NULL` `IS NOT NULL`, with `AND` `OR` `NOT` and parentheses. The dimension goes on the left; the other side is a literal |
 | `WHERE` over a measure | ❌ | that is `HAVING` — refused, and the refusal says so |
+| `DATE_TRUNC('<grain>', <date dimension>)` in the SELECT | ✅ | grains: `year` `quarter` `month` `week` `day`. Groups by the truncated value; the column is named `<dimension>_<grain>` unless aliased |
+| `MONTH(d)`, `YEAR(d)`, `EXTRACT(… FROM d)` | ❌ | they extract a *number*, so every July collapses into one row — see §3.7 |
 | `GROUP BY` | ❌ | implicit: selecting a dimension groups by it |
 | `HAVING` | ❌ | filter the returned rows in the caller |
 | `ORDER BY` | ✅ | over names the request **selects** (entity or alias), `ASC`/`DESC`, several keys. A position (`ORDER BY 1`), an aggregate, or an unselected name is refused |
@@ -679,7 +720,8 @@ where an expression can be written.
 | Arithmetic | `+ - * /`, `%`, `POWER` | ❌ both places |
 | Casting | `CAST(x AS INT)`, `x::INT`, `TRY_CAST` | ❌ |
 | Conditionals | `CASE WHEN`, `IF`, `IFNULL`, `COALESCE`, `NULLIF` | ❌ |
-| Date/time | `DATE_TRUNC`, `EXTRACT`, `DATE_PART`, `DATEDIFF`, `NOW()`, `CURRENT_DATE`, interval maths | ❌ — this is why `type: date` grants no time-grain ability |
+| Date/time | `DATE_TRUNC` over a date dimension | ✅ in the SELECT list only (§3.7) |
+| Date/time | `EXTRACT`, `MONTH`, `YEAR`, `DATE_PART`, `DATEDIFF`, `NOW()`, `CURRENT_DATE`, interval maths | ❌ |
 | String | `UPPER`, `LOWER`, `CONCAT`, `SUBSTRING`, `TRIM`, `REPLACE`, `REGEXP_*` | ❌ |
 | Numeric | `ROUND`, `ABS`, `FLOOR`, `CEIL` | ❌ |
 | Comparison / predicates | `=`, `>`, `BETWEEN`, `IN`, `LIKE`, `IS NULL`, `AND`, `OR`, `NOT` | ✅ **inside `WHERE`**, against a dimension and a literal (A.2). Still ❌ anywhere else |

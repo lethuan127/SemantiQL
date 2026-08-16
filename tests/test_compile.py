@@ -271,3 +271,42 @@ def test_a_metric_does_not_add_a_grouping(model: SemanticModel) -> None:
     )
     assert compiled.count("GROUP BY") == 1
     assert "GROUP BY channel" in compiled, compiled
+
+
+# --- Time grains (spec 007).
+
+
+def test_a_grain_truncates_and_groups_by_the_same_expression(model: SemanticModel) -> None:
+    """GROUP BY repeats the expression: ordering by an alias is portable, grouping is not."""
+    compiled = compile_request(
+        _valid("SELECT revenue, DATE_TRUNC('month', order_date) FROM orders", model),
+        model,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    assert "DATE_TRUNC('MONTH', order_date) AS order_date_month" in compiled, compiled
+    assert "GROUP BY DATE_TRUNC('MONTH', order_date)" in compiled, compiled
+
+
+def test_a_grain_honours_an_alias(model: SemanticModel) -> None:
+    compiled = compile_request(
+        _valid("SELECT revenue, DATE_TRUNC('month', order_date) AS m FROM orders", model),
+        model,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    assert "AS m" in compiled, compiled
+
+
+def test_a_grain_is_spelled_differently_by_each_dialect(model: SemanticModel) -> None:
+    """The strongest N4 evidence available: one canonical statement, four spellings."""
+    request = _valid("SELECT revenue, DATE_TRUNC('month', order_date) FROM orders", model)
+    rendered = {
+        d: compile_request(request, model, relation=ORDERS, dialect=d)
+        for d in ("duckdb", "bigquery", "tsql", "mysql")
+    }
+    assert "DATE_TRUNC('MONTH', order_date)" in rendered["duckdb"]
+    assert "TIMESTAMP_TRUNC(order_date, MONTH)" in rendered["bigquery"]
+    assert "DATETRUNC(MONTH, order_date)" in rendered["tsql"]
+    assert "TIMESTAMPDIFF" in rendered["mysql"]
+    assert len(set(rendered.values())) == 4, rendered

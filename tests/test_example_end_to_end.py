@@ -169,3 +169,19 @@ def test_a_metric_can_be_ordered_by(model: SemanticModel, adapter: DuckDBAdapter
         adapter,
     )
     assert result.rows[0][result.columns.index("channel")] == "partner"
+
+
+def test_a_monthly_grain_splits_the_corpus(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    """July 1491.74 and August 194.50, computed from the ten rows independently."""
+    result = _result("SELECT revenue, DATE_TRUNC('month', order_date) FROM orders", model, adapter)
+    month = result.columns.index("order_date_month")
+    revenue = result.columns.index("revenue")
+    got = {str(row[month])[:7]: round(float(row[revenue]), 2) for row in result.rows}
+    assert got == {"2026-07": 1491.74, "2026-08": 194.50}
+
+
+def test_a_yearly_grain_keeps_the_total(model: SemanticModel, adapter: DuckDBAdapter) -> None:
+    """Every row is 2026, so the yearly grain must reproduce the grand total exactly."""
+    result = _result("SELECT revenue, DATE_TRUNC('year', order_date) FROM orders", model, adapter)
+    assert len(result.rows) == 1
+    assert round(float(result.rows[0][result.columns.index("revenue")]), 2) == 1686.24

@@ -156,6 +156,27 @@ _OPERATORS: dict[type[exp.Expr], str] = {
 #: Operators that order their values, so they say nothing on a boolean dimension.
 _ORDERING: frozenset[str] = frozenset({"<", "<=", ">", ">=", "between"})
 
+#: The grains a date dimension may be truncated to. Closed, so an unrecognised unit is refused
+#: here rather than passed to the engine as text.
+_GRAINS: frozenset[str] = frozenset({"year", "quarter", "month", "week", "day"})
+
+#: What a `DATE_TRUNC(...)` projection may carry. A time zone argument, or anything sqlglot
+#: adds later, refuses rather than being dropped.
+_TRUNC_ARGS: frozenset[str] = frozenset({"this", "unit"})
+
+#: Functions that look like a grain and are not one. `MONTH(d)` returns the month *number*, so
+#: July 2026 and July 2025 both become `7` and a two-year query silently merges them into one
+#: row whose total is real and whose meaning is wrong. Refused by name, with the truncating
+#: form offered, rather than quietly treated as what the caller probably meant.
+_EXTRACT_FORMS: tuple[type[exp.Expr], ...] = (
+    exp.Year,
+    exp.Quarter,
+    exp.Month,
+    exp.Week,
+    exp.Day,
+    exp.Extract,
+)
+
 
 def _bare(arg: str) -> str:
     """The argument name without sqlglot's keyword-collision suffix.
@@ -190,10 +211,12 @@ class Refusal:
 
 @dataclass(frozen=True)
 class Projection:
-    """One selected item: the model entity, and the name the caller wants it back under."""
+    """One selected item: the model entity, the name the caller wants it back under, and —
+    for a date dimension asked for at a coarser grain — the period it is truncated to."""
 
     entity: str
     output: str
+    grain: str | None = None
 
 
 #: A filter value, already parsed out of the request and type-checked against the dimension
@@ -272,18 +295,51 @@ class SemanticSyntaxError(Exception):
     """The request was not parseable as semantic SQL."""
 
 
+def _grain(node: exp.Expr) -> tuple[str, str]:
+    """The dimension name and grain behind a `DATE_TRUNC('month', order_date)` projection."""
+    for arg, value in node.args.items():
+        if value and arg not in _TRUNC_ARGS:
+            raise SemanticSyntaxError(
+                f"DATE_TRUNC here carries {_bare(arg).upper()}, which this engine does not "
+                "apply, so the request is refused rather than answered without it"
+            )
+    column = node.this
+    if not isinstance(column, exp.Column):
+        raise SemanticSyntaxError(
+            f"DATE_TRUNC must be applied directly to a date dimension, but got {node.this.sql()!r}"
+        )
+    unit = str(node.args["unit"].name).lower()
+    if unit not in _GRAINS:
+        raise SemanticSyntaxError(
+            f"{unit!r} is not a grain this engine supports. Use one of: "
+            f"{', '.join(sorted(_GRAINS))}"
+        )
+    return column.name, unit
+
+
 def _projections(select: exp.Select) -> list[Projection]:
     """The identifiers a SELECT projects, in order, with any alias preserved."""
     out: list[Projection] = []
     for projection in select.expressions:
-        if isinstance(projection, exp.Column):
-            out.append(Projection(entity=projection.name, output=projection.name))
-        elif isinstance(projection, exp.Alias) and isinstance(projection.this, exp.Column):
-            out.append(Projection(entity=projection.this.name, output=projection.alias))
+        item = projection.this if isinstance(projection, exp.Alias) else projection
+        alias = projection.alias if isinstance(projection, exp.Alias) else None
+
+        if isinstance(item, exp.Column):
+            out.append(Projection(entity=item.name, output=alias or item.name))
+        elif isinstance(item, exp.TimestampTrunc | exp.DateTrunc):
+            name, grain = _grain(item)
+            out.append(Projection(entity=name, output=alias or f"{name}_{grain}", grain=grain))
+        elif isinstance(item, _EXTRACT_FORMS):
+            raise SemanticSyntaxError(
+                f"{item.sql()!r} extracts a number from a date rather than truncating it, so "
+                "every July would collapse into one row regardless of year. Write "
+                "DATE_TRUNC('month', <date dimension>) for a monthly series"
+            )
         else:
             raise SemanticSyntaxError(
-                "each selected item must be a plain dimension or measure name, optionally "
-                f"aliased, but got {projection.sql()!r}"
+                "each selected item must be a plain dimension or measure name, or "
+                "DATE_TRUNC over a date dimension, optionally aliased, but got "
+                f"{projection.sql()!r}"
             )
     return out
 
@@ -583,6 +639,19 @@ def validate(sql: str, model: SemanticModel) -> ValidRequest | Refusal:
                 f"{item.entity!r} is not defined on table {table_name!r}.",
                 _suggest(item.entity, table.entity_names),
             )
+        if item.grain is not None:
+            dimension = table.dimensions.get(item.entity)
+            if dimension is None:
+                return Refusal(
+                    f"{item.entity!r} is not a dimension of {table_name!r}, so it cannot be "
+                    "asked for at a coarser grain. A grain applies to a date dimension."
+                )
+            if dimension.type != "date":
+                return Refusal(
+                    f"{item.entity!r} is declared {dimension.type}, not date, so "
+                    f"{item.grain!r} means nothing for it."
+                )
+
         # A metric computes a number the same way a measure does, so it counts as one here
         # and is likewise not a grouping key.
         if item.entity in table.measures or item.entity in table.metrics:

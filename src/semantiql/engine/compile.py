@@ -174,6 +174,10 @@ def compile_request(
     # Requested order is preserved: a caller indexing rows positionally should get the
     # columns it asked for, in the order it asked for them.
     projections: list[exp.Expr] = []
+    #: The grouping keys, built alongside the projections so a grain is carried into both.
+    #: GROUP BY repeats the expression rather than naming the output alias: ordering by an
+    #: alias is portable, grouping by one is not.
+    grouping: list[exp.Expr] = []
     for item in request.projections:
         if item.entity in table.metrics:
             built = _metric(table.expression_for(item.entity), table)
@@ -182,15 +186,19 @@ def compile_request(
             projections.append(_aggregate(table.measures[item.entity], item.output))
         else:
             dimension = table.dimensions[item.entity]
-            projections.append(exp.alias_(exp.column(dimension.column), item.output))
+            built = exp.column(dimension.column)
+            if item.grain is not None:
+                built = exp.TimestampTrunc(this=built, unit=exp.var(item.grain))
+            grouping.append(built)
+            projections.append(exp.alias_(built, item.output))
 
     select = exp.select(*projections).from_(relation)
 
     if request.filter is not None:
         select = select.where(_predicate(request.filter, table))
 
-    for name in request.dimensions:
-        select = select.group_by(exp.column(table.dimensions[name].column))
+    for group_key in grouping:
+        select = select.group_by(group_key)
 
     # Ordering names the *output* column — `ORDER BY revenue`, the word the caller used —
     # rather than repeating `SUM(amount)`. Both MVP engines accept it, and the emitted SQL

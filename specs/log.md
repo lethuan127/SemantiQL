@@ -1,6 +1,12 @@
 # Update Log
 
 ## 2026-08-16
+* **Update**: Shipped 007 — 5 of 5 tasks; `DATE_TRUNC` over date dimensions with a closed five-grain vocabulary, the extract forms refused for collapsing years, 18 new test cases, verify gate green at 194 tests. One canonical statement now renders four distinct ways, the strongest N4 evidence in the repo [007](/007-time-grains/spec.md)
+* **Creation**: Plan and task list drafted for 007 — grain carried on `Projection`, GROUP BY repeats the expression, extract forms refused with a message naming `DATE_TRUNC`. 7 files to modify, 0 to add [007](/007-time-grains/plan.md)
+* **Update**: Clarified 4 ambiguities for 007 — grain in the request rather than predeclared in the model; `DATE_TRUNC` only, with `MONTH()`/`EXTRACT()` refused because they collapse years; default output name `<dimension>_<grain>`; GROUP BY the expression, not the alias [007](/007-time-grains/clarifications.md)
+* **Creation**: Spec drafted for time grains — the last Tier-1 report gap, and the strongest N4 demonstration available since `DATE_TRUNC` renders five ways across dialects [007](/007-time-grains/spec.md)
+
+## 2026-08-16
 * **Update**: Shipped 006 — 7 of 7 tasks; metrics derived from measures with a closed grammar validated at load, every divisor guarded with NULLIF because DuckDB returns `inf` for 1/0, 19 new test cases, verify gate green at 176 tests. Layer 1 now has the metrics its own architecture doc has always described [006](/006-derived-metrics/spec.md)
 * **Update**: Task list drafted for 006 — 7 tasks, one [P] pair for the derived copies [006](/006-derived-metrics/tasks.md)
 * **Creation**: Plan and impact map drafted for 006 — new `knowledge/expression.py` holds the metric IR and its closed-grammar parser; metrics validate at load and compile to guarded aggregate expressions. 10 files to modify, 1 to add [006](/006-derived-metrics/plan.md)

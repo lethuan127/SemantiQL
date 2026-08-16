@@ -320,3 +320,43 @@ def test_filtering_on_a_metric_is_refused(model: SemanticModel) -> None:
 def test_a_metric_alone_computes_a_number(model: SemanticModel) -> None:
     """A request selecting only a metric is answerable — it computes something."""
     assert isinstance(validate("SELECT revenue_per_order FROM orders", model), ValidRequest)
+
+
+# --- Time grains (spec 007). The hazard is a spelling that looks right and collapses years.
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT revenue, MONTH(order_date) FROM orders", "DATE_TRUNC"),
+        ("SELECT revenue, YEAR(order_date) FROM orders", "DATE_TRUNC"),
+        ("SELECT revenue, EXTRACT(MONTH FROM order_date) FROM orders", "DATE_TRUNC"),
+        ("SELECT revenue, DATE_TRUNC('fortnight', order_date) FROM orders", "not a grain"),
+        ("SELECT revenue, DATE_TRUNC('month', channel) FROM orders", "not date"),
+        ("SELECT revenue, DATE_TRUNC('month', revenue) FROM orders", "not a dimension"),
+        (
+            "SELECT revenue, DATE_TRUNC('month', DATE_TRUNC('year', order_date)) FROM orders",
+            "applied directly",
+        ),
+    ],
+)
+def test_a_grain_it_cannot_honour_is_refused(sql: str, expected: str, model: SemanticModel) -> None:
+    outcome = run(sql, model, ExplodingAdapter())
+    assert isinstance(outcome, Refusal), f"accepted a grain it cannot honour: {sql}"
+    assert expected in outcome.reason, f"{expected!r} not in {outcome.reason!r}"
+
+
+def test_the_extract_refusal_explains_the_collapse(model: SemanticModel) -> None:
+    """A refusal that only declines sends the caller hunting for a typo."""
+    outcome = run("SELECT revenue, MONTH(order_date) FROM orders", model, ExplodingAdapter())
+    assert isinstance(outcome, Refusal)
+    assert "collapse" in outcome.reason
+
+
+@pytest.mark.parametrize("grain", ["year", "quarter", "month", "week", "day"])
+def test_every_grain_validates(grain: str, model: SemanticModel) -> None:
+    sql = f"SELECT revenue, DATE_TRUNC('{grain}', order_date) FROM orders"
+    request = validate(sql, model)
+    assert isinstance(request, ValidRequest), request
+    assert request.projections[1].grain == grain
+    assert request.projections[1].output == f"order_date_{grain}"

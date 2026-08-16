@@ -64,8 +64,11 @@ Also refused, for the same reason: any construct the compiler cannot honour — 
 What *is* supported, and how tightly: `WHERE` over **dimensions** compared to **literals**
 whose type matches the dimension's declared `type`, with the predicate rebuilt from the model
 rather than carried over (spec 004); and `ORDER BY` over names the request **selects**, plus
-`LIMIT`/`OFFSET` as non-negative whole numbers (spec 005). Filtering a measure is refused as
-needing `HAVING`; ordering by a position or an unselected name is refused too.
+`LIMIT`/`OFFSET` as non-negative whole numbers (spec 005); metrics derived from measures under
+a closed expression grammar (spec 006); and `DATE_TRUNC('<grain>', <date dimension>)` in the
+SELECT list (spec 007). Filtering a measure is refused as needing `HAVING`; ordering by a
+position or an unselected name is refused; and `MONTH()`/`EXTRACT()` are refused because they
+extract a number rather than truncating, which would collapse every July into one row.
 
 The reason refusal is the default: `compile_request` rebuilds the query from the model, so an
 unvalidated construct would *vanish* and the caller would get a wrong number.
