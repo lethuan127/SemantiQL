@@ -92,7 +92,12 @@ def _doctor(model_path: str, args: argparse.Namespace) -> int:
     finally:
         adapter.close()
 
-    print(_render_findings(findings))
+    # Flushed before the summary below, which goes to stderr. Without this the two streams
+    # buffer differently the moment stdout is a pipe — block-buffered stdout, unbuffered
+    # stderr — and the summary line lands *above* the findings it summarises. Invisible in a
+    # terminal, wrong in `semantiql doctor | tee setup.log`, which is exactly where a setup
+    # script reads it.
+    print(_render_findings(findings), flush=True)
     failed = problems(findings)
     tables = len(model.table_names)
     noun = "table" if tables == 1 else "tables"

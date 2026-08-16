@@ -13,3 +13,4 @@ Working design documents. Everything here is draft-stage and evolves as the proj
 | [07-code-map.md](07-code-map.md) | The four layers mapped to modules, and the adapter seam |
 | [08-positioning.md](08-positioning.md) | What SemantiQL aims to do differently, and how to judge it |
 | [09-data-modeling.md](09-data-modeling.md) | Writing the semantic model — every field, what it compiles to, what is refused |
+| [10-adopting-semantiql.md](10-adopting-semantiql.md) | **Start here to use it on your own data** — install, model one table, run `doctor`, ask questions |

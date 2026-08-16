@@ -50,6 +50,10 @@ refused: 'profit' is not defined on table 'orders'.
 That refusal is the point of the project, not a limitation. Run `./scripts/verify.sh` to
 check everything the CI checks.
 
+**Using it on your own database?** [docs/10-adopting-semantiql.md](docs/10-adopting-semantiql.md)
+walks the whole path — read-only account, modelling one table, the `doctor` loop that stands in
+for the not-yet-built wizard, and what is refused and why.
+
 ### Against Postgres
 
 The same model, the same question, a different engine:
