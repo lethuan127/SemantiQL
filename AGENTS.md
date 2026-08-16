@@ -57,11 +57,19 @@ A shortcut to an adapter is the change most likely to be rejected.
 This is a rule, not a guarantee: `Adapter.execute` takes a plain string and nothing prevents
 calling it directly. Treat it as load-bearing convention until a validated-SQL type exists.
 
-Also refused, for the same reason: any clause the compiler cannot honour — `WHERE`,
-`HAVING`, `ORDER BY`, `LIMIT`, `DISTINCT`, CTEs, subqueries, joins. `compile_request`
-rebuilds the query from the model, so an unvalidated clause would *vanish* and the caller
-would get a wrong number. If you implement one of those, remove it from
-`_UNSUPPORTED_CLAUSES` in the same change — never before.
+Also refused, for the same reason: any construct the compiler cannot honour — `WHERE`,
+`HAVING`, `ORDER BY`, `LIMIT`, `DISTINCT`, CTEs, subqueries, joins, `TABLESAMPLE`, `PIVOT`.
+`compile_request` rebuilds the query from the model, so an unvalidated construct would
+*vanish* and the caller would get a wrong number.
+
+That check is an **allowlist**: `_SELECT_ARGS` and `_FROM_NODE_ARGS` in `validate.py` name
+what the compiler consumes — node types *and* the arguments each may carry — and everything
+else is refused for being absent from them. It used to be a denylist and it failed:
+`TABLESAMPLE` and `PIVOT` were listed by name and still slipped through, because sqlglot
+attaches them to the table rather than to the SELECT, and `ONLY`/`WITH ORDINALITY` slipped
+through a node-type check because sqlglot stores them as bare flags (spec 003). So:
+if you implement a construct, add it to the allowlist **in the same change that teaches the
+compiler to honour it — never before**.
 
 **N3 — The semantic model YAML is the source of truth.** `knowledge/loader.py` is the only
 thing that reads it. Never hard-code a model value in Python.

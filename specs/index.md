@@ -14,4 +14,5 @@ artifact with no `verified` entry has not passed its gate. The repo's non-negoti
 bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md).
 
 * [001-init-project-scaffold/](001-init-project-scaffold/) - T2, shipped (FR-9 blocked), checkpoint 1 human-approved - initialize the repo: dev environment, verify gate, one runnable end-to-end example, and the artifacts a stranger needs to contribute
+* [003-refuse-unimplemented-constructs/](003-refuse-unimplemented-constructs/) - T2, shipped - close the silent-drop gap — TABLESAMPLE and PIVOT are accepted and dropped today; make refusal the default for anything unimplemented
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above

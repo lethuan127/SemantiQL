@@ -11,7 +11,7 @@ import pytest
 from sqlglot import exp
 
 from semantiql.engine.run import run
-from semantiql.engine.validate import Refusal, ValidRequest, validate
+from semantiql.engine.validate import _CLAUSE_LABELS, Refusal, ValidRequest, validate
 from semantiql.knowledge.model import SemanticModel
 
 
@@ -99,6 +99,17 @@ def test_a_valid_request_passes_validation(model: SemanticModel) -> None:
         "SELECT revenue FROM orders JOIN other ON 1 = 1",
         "SELECT revenue FROM orders, other",
         "SELECT revenue FROM orders UNION SELECT revenue FROM orders",
+        # Attached to the table rather than to the SELECT. These two were listed by name in
+        # the old denylist and still slipped through, because it only read the SELECT's own
+        # arguments — both were accepted and the clause discarded (spec 003).
+        "SELECT revenue FROM orders TABLESAMPLE (10 PERCENT)",
+        "SELECT revenue FROM orders PIVOT (SUM(amount) FOR channel IN ('web'))",
+        "SELECT revenue FROM orders UNPIVOT (v FOR k IN (amount))",
+        # Stored as a bare flag on the table rather than as a node, so walking expressions
+        # does not see them. `ONLY` excludes inheriting child tables on Postgres, so dropping
+        # it changes which rows exist.
+        "SELECT revenue FROM ONLY orders",
+        "SELECT revenue FROM orders WITH ORDINALITY",
     ],
 )
 def test_unsupported_clauses_are_refused_never_dropped(sql: str, model: SemanticModel) -> None:
@@ -111,6 +122,56 @@ def test_the_refusal_names_the_clause(model: SemanticModel) -> None:
     outcome = run("SELECT revenue FROM orders WHERE channel = 'web'", model, ExplodingAdapter())
     assert isinstance(outcome, Refusal)
     assert "WHERE" in outcome.reason
+
+
+def test_the_refusal_names_a_table_level_clause(model: SemanticModel) -> None:
+    outcome = run("SELECT revenue FROM orders TABLESAMPLE (10 PERCENT)", model, ExplodingAdapter())
+    assert isinstance(outcome, Refusal)
+    assert "TABLESAMPLE" in outcome.reason
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT revenue INTO t FROM orders",
+        "SELECT revenue FROM orders START WITH 1 = 1 CONNECT BY 1 = 1",
+    ],
+)
+def test_a_construct_nobody_enumerated_is_still_refused(sql: str, model: SemanticModel) -> None:
+    """The point of the allowlist: refusal must not depend on having anticipated the clause.
+
+    `INTO` appears in no label map, so the refusal is decided by its absence from
+    `_SELECT_ARGS` and named from the parsed request. If refusing ever starts depending on a
+    lookup, this test is what notices.
+    """
+    assert "into" not in _CLAUSE_LABELS, "the test needs a construct that is deliberately unlisted"
+    outcome = run(sql, model, ExplodingAdapter())
+    assert isinstance(outcome, Refusal)
+
+
+# --- The surface that must keep working. A refusal is the designed answer for what this
+# engine cannot honour — but tightening the allowlist onto requests it *can* honour would
+# trade one silent failure for a wave of loud ones, so FR-5 pins the accepted forms.
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT revenue FROM orders",
+        "SELECT revenue AS total FROM orders",
+        'SELECT "revenue" FROM "orders"',
+        "SELECT orders.revenue FROM orders",
+        "SELECT revenue FROM orders AS o",
+        "SELECT revenue FROM main.orders",
+        "SELECT revenue FROM cat.main.orders AS o",
+        "SELECT revenue FROM orders;",
+        "SELECT revenue -- a trailing comment\nFROM orders",
+        "select revenue, channel from orders",
+        "SELECT ALL revenue FROM orders",
+    ],
+)
+def test_the_answerable_surface_is_unchanged(sql: str, model: SemanticModel) -> None:
+    assert isinstance(validate(sql, model), ValidRequest), f"regressed an answerable request: {sql}"
 
 
 def test_dialect_mismatch_is_refused(model: SemanticModel) -> None:
