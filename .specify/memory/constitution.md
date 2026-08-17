@@ -66,11 +66,25 @@ These are invariants. A change that would violate one needs its own `specs/NNN-c
 | `README.md` | the public summary; the roadmap table is canonical |
 | `docs/NN-*.md` | design docs — the spec for the system, indexed by `docs/README.md` |
 | `specs/` | SDD change records, as an OKF bundle |
+| `tests/` | three suites, split by what each one needs — see the rule below |
+| `examples/` | the bundled example, and simultaneously the unit suite's corpus |
+| `scripts/` | `verify.sh` is the gate: the one command CI and a contributor both run |
+| `compose.yaml` | a throwaway database for the `pg` suite; CI starts it from this same file |
 | `.specify/memory/` | this constitution |
 | `.claude/skills/`, `.claude/agents/` | agent configuration |
 | `CLAUDE.md` | agent-facing orientation; mirrors this constitution, never contradicts it |
 
-**Source-code layout is deliberately unassigned.** It is decided by the repo-initialization spec, not presumed here.
+Two of those carry a rule that outlives any single change.
+
+**A suite that cannot run must skip, never fail.** The unmarked tests need nothing; `e2e` needs a
+generated corpus; `pg` needs a database. A fresh clone has to pass the gate with nothing
+installed and no network, so neither optional suite may become a hard failure and the gate may
+never require Docker.
+
+**`examples/` is test data as much as demonstration.** Its totals are asserted by hand, so a row
+cannot be changed without recomputing them.
+
+**Source-code layout is deliberately unassigned**, and stays that way — it is decided by the repo-initialization spec and mapped in [`docs/07-code-map.md`](../../docs/07-code-map.md), not presumed here. The rows above cover the top level only.
 
 # Tech stack
 
