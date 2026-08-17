@@ -1,0 +1,11 @@
+# A model spread over several files (spec 015). This file declares what belongs to the model as a
+# whole; every other file declares tables.
+#
+# `version` and `datasource` are declared **exactly once** across the directory. Repeating them in
+# every file would mean thirty places to change one dialect, and two different values would leave
+# nothing authoritative — so a second declaration is refused rather than merged.
+version: 1
+
+datasource:
+  name: warehouse
+  dialect: duckdb

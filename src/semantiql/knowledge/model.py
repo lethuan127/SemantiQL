@@ -93,6 +93,14 @@ class Table(_Strict):
     """A physical relation plus the semantics layered over it."""
 
     source: str
+    description: str | None = None
+    """What this table is, in a sentence. Read by `describe_model` (spec 015).
+
+    It earns its place at scale. With one table the name is enough; with thirty, Claude is choosing
+    between `orders`, `order_lines` and `orders_v2` from an index that deliberately does not
+    include their definitions — and a sentence is what makes that choice correct rather than a
+    guess. Say what a row *is*, and name the trap: "one row per order line, not per order".
+    """
     dimensions: dict[str, Dimension] = Field(default_factory=dict)
     measures: dict[str, Measure] = Field(default_factory=dict)
     metrics: dict[str, Metric] = Field(default_factory=dict)

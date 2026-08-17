@@ -76,6 +76,45 @@ Four levels, and each has exactly one job:
 
 ---
 
+## 2b. One file, or a directory
+
+A model can be a single YAML file, or a **directory** of them — one per table is the useful shape:
+
+```
+model/
+├── datasource.yml      version and datasource, declared once for the whole model
+├── sales/
+│   └── orders.yml      tables: { orders: … }
+└── support/
+    └── tickets.yml     tables: { tickets: … }
+```
+
+Point `-m` (or `SEMANTIQL_MODEL`) at either. Every `.yml` and `.yaml` under the directory
+contributes, including subdirectories, read in sorted order.
+
+**Why bother.** One file holding a warehouse is unreviewable: a pull request changing one metric
+shows a diff nobody can read, two people editing different tables conflict, and `CODEOWNERS`
+cannot put the billing tables with the billing team. One file per table fixes all three. Start
+with a single file; move to a directory when it stops being reviewable.
+
+**Four rules, and all four are refusals** — because a merge that silently picks a definition is
+exactly the failure a semantic layer exists to prevent:
+
+| Situation | What happens |
+|---|---|
+| `datasource` or `version` declared in two files | refused, naming both files |
+| No file declares `datasource` | refused |
+| The same table defined in two files | refused, naming both files and the table |
+| A file declaring nothing, or an unrecognised key like `tabels:` | refused, naming the file |
+
+Nothing is ever merged or last-one-wins. A silently ignored file is a table someone believes they
+modelled.
+
+**A relative `source` resolves against the file that declared it**, not the directory root — so a
+CSV can sit beside the YAML describing it, wherever in the tree that is.
+
+`examples/warehouse/` is a working two-table directory model.
+
 ## 3. Field reference
 
 Every model object rejects unknown keys and is frozen after loading
@@ -121,6 +160,11 @@ does not have to resemble the physical column.
 A name defined twice across dimensions, measures and metrics on the same table is rejected at
 load: they would resolve inconsistently, so the same word would mean two different things
 depending on who asked.
+
+> **`description` on a table earns its place at scale.** With one table the name is enough. With
+> thirty, Claude sees an index — names and counts, deliberately without the definitions — and picks
+> from it. A sentence is what makes that pick correct: say what a row *is*, and name the trap
+> ("one row per order line, not per order").
 
 ### 3.4 `dimensions.<name>` — `Dimension` (`model.py:23`)
 

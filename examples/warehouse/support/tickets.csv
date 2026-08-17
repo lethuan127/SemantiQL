@@ -1,0 +1,6 @@
+ticket_id,opened_on,priority,first_response_minutes
+1,2026-07-02,high,12
+2,2026-07-03,low,240
+3,2026-07-11,high,7
+4,2026-07-19,medium,63
+5,2026-08-02,low,180

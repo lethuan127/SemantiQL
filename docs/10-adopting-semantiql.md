@@ -71,8 +71,13 @@ Keep the password out of your shell history: omit `--dsn` entirely and let libpq
 
 ## Step 3 — Write a first draft of the model
 
-Pick **one** table or view and describe it. Do not try to model your whole warehouse; model the
-one thing you are asked about most, and grow from there.
+Pick **one** table or view and describe it. Model the one thing you are asked about most and grow
+from there — not because the engine cannot handle more, but because a model you have not verified
+is worse than a small one you have.
+
+When one file stops being reviewable, split it into a **directory** — one YAML per table, which is
+what makes a per-table diff and per-team ownership possible. `-m` takes either. See
+[09-data-modeling.md §2b](09-data-modeling.md) and the worked example in `examples/warehouse/`.
 
 Three kinds of thing go in a model:
 

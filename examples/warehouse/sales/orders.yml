@@ -1,0 +1,38 @@
+# One table, one file. A change to what `revenue` means is a small diff in an obvious place, and
+# `git log examples/warehouse/sales/orders.yml` is a history of this table alone.
+tables:
+  orders:
+    # Relative to *this* file, not the directory root — so the data can sit beside the YAML that
+    # describes it.
+    source: ../../retail/orders.csv
+
+    dimensions:
+      channel:
+        column: channel
+        type: string
+        label: Sales channel
+        description: How the order was placed — web, retail, or partner.
+      region:
+        column: region
+        type: string
+        label: Region
+      order_date:
+        column: order_date
+        type: date
+        label: Order date
+
+    measures:
+      revenue:
+        column: amount
+        agg: sum
+        label: Revenue
+        description: Sum of order amounts. The one sanctioned definition of revenue.
+      order_count:
+        column: order_id
+        agg: count
+        label: Orders
+
+    metrics:
+      revenue_per_order:
+        expression: revenue / order_count
+        label: Revenue per order

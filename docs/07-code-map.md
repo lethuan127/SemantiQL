@@ -8,7 +8,7 @@ right and this file is stale — please fix it.
 src/semantiql/
   knowledge/     1. Semantic Knowledge
     model.py       pydantic models: Dimension, Measure, Table, SemanticModel
-    loader.py      the only reader of the semantic model YAML
+    loader.py      the only reader of the model YAML — one file, or a directory of them
   engine/        2. SQL Engine
     validate.py    resolve every identifier against the model, or refuse
     compile.py     canonical SQL, then sqlglot transpile to the target dialect
@@ -34,6 +34,7 @@ tests/
     semantic_model.yml    the model under test, plus a `.postgres.yml` sibling
     test_*.py             engine vs hand-written SQL, and DuckDB vs Postgres
 examples/retail/        the bundled example — and the unit suite's corpus. Not free to edit.
+examples/warehouse/     a worked directory model: one YAML per table, datasource declared once
   orders.csv              ten rows whose totals are asserted by hand in tests/
   semantic_model.yml      the model the README quickstart runs, plus a `.postgres.yml` sibling
 bundle/                 the Claude Desktop bundle's committed parts

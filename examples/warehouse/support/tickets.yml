@@ -1,0 +1,26 @@
+# A second table, owned by a different team in a real deployment — which is the point of the
+# layout. CODEOWNERS can put support/ with the support team, so the people who know what a metric
+# means are the ones who approve changes to it.
+tables:
+  tickets:
+    source: tickets.csv
+
+    dimensions:
+      priority:
+        column: priority
+        type: string
+        label: Priority
+      opened_on:
+        column: opened_on
+        type: date
+        label: Opened
+
+    measures:
+      ticket_count:
+        column: ticket_id
+        agg: count
+        label: Tickets
+      avg_first_response_minutes:
+        column: first_response_minutes
+        agg: avg
+        label: Avg first response (minutes)

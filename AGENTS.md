@@ -105,6 +105,11 @@ compiler to honour it — never before**.
 **N3 — The semantic model YAML is the source of truth.** `knowledge/loader.py` is the only
 thing that reads it. Never hard-code a model value in Python.
 
+A model may be one file or a **directory** of them, one per table (spec 015). Every ambiguity in
+the merge is refused naming the files — a table defined twice, `datasource` declared twice or not
+at all, a file contributing nothing — because last-one-wins across files is the same silent
+redefinition the duplicate-key check refuses within one.
+
 **N4 — One canonical dialect, then transpile.** Adding a datasource is one new module under
 `adapters/` satisfying `adapters/base.py`, with **no change to `engine/`**. Verify with:
 

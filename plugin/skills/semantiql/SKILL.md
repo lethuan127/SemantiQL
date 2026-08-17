@@ -15,13 +15,31 @@ cannot be answered from the model, say so — never estimate, never substitute a
 
 ## Always start with `describe_model`
 
-Call it before your first query in a conversation. It returns each table's **dimensions** (things
-to group or filter by), **measures** (numbers) and **metrics** (numbers derived from measures),
-each with a `label` and a `description`.
+Call it before your first query in a conversation.
+
+**With one table** you get everything: its **dimensions** (things to group or filter by),
+**measures** (numbers) and **metrics** (numbers derived from measures), each with a `label` and a
+`description`.
+
+**With several tables** you get an index instead — each table's name, description, and how many
+dimensions, measures and metrics it has. Pick the one the question is about and call again with
+`table` set to its name:
+
+```
+describe_model()                    → orders (3 dimensions, 2 measures), tickets (2, 2)
+describe_model(table="orders")      → the definitions
+```
+
+That is deliberate. A thirty-table model sent in full would fill the conversation with definitions
+nobody asked for, and make it likelier that you pick a plausible-looking measure from a table the
+question was never about. The reply tells you when to call again.
 
 Those names are the only ones that exist. The labels and descriptions are how you map what the
 person said — "sales channel", "revenue", "how many customers" — onto them. Read the descriptions:
 they often carry the distinction that matters, like whether a count means orders or order lines.
+
+If you name a table that does not exist, the reply lists the ones that do. Retry with one of those
+rather than guessing again.
 
 ## Writing a query
 

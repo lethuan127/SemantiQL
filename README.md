@@ -39,6 +39,9 @@ web      956.5    5
 retail   344.49   3
 ```
 
+A model can also be a **directory** of YAML files, one per table, so a warehouse stays reviewable
+and a metric change is a small diff — see [`examples/warehouse/`](examples/warehouse/).
+
 `revenue` and `channel` are defined in [`examples/retail/semantic_model.yml`](examples/retail/semantic_model.yml) —
 not in the query. So is `revenue_per_order`, a metric derived from two measures and computed
 after grouping. [docs/09-data-modeling.md](docs/09-data-modeling.md) is the full reference for writing one. Ask for something the model doesn't define and it refuses rather than guessing:

@@ -14,6 +14,7 @@ ever needs its own test.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any, TypeVar
 
 import anyio
@@ -89,8 +90,11 @@ def test_query_takes_one_required_string(server: Any) -> None:
     assert schema["required"] == ["sql"]
 
 
-def test_describe_model_takes_no_arguments(server: Any) -> None:
-    assert _tools(server)["describe_model"].input_schema.get("properties", {}) == {}
+def test_describe_model_takes_one_optional_argument(server: Any) -> None:
+    """It gained `table` in spec 015. Omitting it must stay valid — that is the common call."""
+    schema = _tools(server)["describe_model"].input_schema
+    assert list(schema.get("properties", {})) == ["table"]
+    assert "table" not in schema.get("required", [])
 
 
 def test_both_tools_publish_an_output_schema(server: Any) -> None:
@@ -115,10 +119,15 @@ def test_the_instructions_name_the_refusal_contract(server: Any) -> None:
 
 
 def test_describe_model_lists_the_tables_and_entities(server: Any) -> None:
+    """Entities live under `detail` since spec 015; `tables` is the index.
+
+    The retail model has one table, so detail arrives without asking — there is nothing to choose
+    between and a second round trip would only cost a turn.
+    """
     described = _call(server, "describe_model")
     assert described["dialect"] == "duckdb"
     assert [t["name"] for t in described["tables"]] == ["orders"]
-    kinds = {e["kind"] for e in described["tables"][0]["entities"]}
+    kinds = {e["kind"] for e in described["detail"][0]["entities"]}
     assert kinds == {"dimension", "measure", "metric"}
 
 
@@ -129,7 +138,7 @@ def test_describe_model_surfaces_labels_and_descriptions(server: Any) -> None:
     consumer at all — `docs/09-data-modeling.md` said so in as many words. This is why they
     exist: they are how Claude maps "revenue" in a question onto `revenue` in the model.
     """
-    entities = {e["name"]: e for e in _call(server, "describe_model")["tables"][0]["entities"]}
+    entities = {e["name"]: e for e in _call(server, "describe_model")["detail"][0]["entities"]}
     assert entities["revenue"]["label"] == "Revenue"
     assert "sanctioned definition" in entities["revenue"]["description"]
     assert entities["channel"]["label"] == "Sales channel"
@@ -146,7 +155,7 @@ def test_describe_model_does_not_expose_physical_columns(server: Any) -> None:
     That is the author describing a measure, not the server leaking a field — so the test looks
     at the fields.
     """
-    entities = _call(server, "describe_model")["tables"][0]["entities"]
+    entities = _call(server, "describe_model")["detail"][0]["entities"]
     assert entities, "nothing to check"
     for entity in entities:
         assert "column" not in entity, entity
@@ -279,3 +288,73 @@ def test_an_adapter_failure_is_a_failed_call_not_a_refusal(model: SemanticModel)
 
     with pytest.raises(ToolError, match="datasource could not answer"):
         _run(go)
+
+
+# --- describe_model at scale (spec 015). A thirty-table model described in full would crowd out
+# the conversation and make Claude likelier to pick a plausible entity from a table nobody asked
+# about — so the index comes first and the definitions come on request.
+
+
+@pytest.fixture
+def big_server(tmp_path: Path) -> Any:
+    """A two-table model, which is the smallest thing that has to be chosen between."""
+    from semantiql.adapters.duckdb import DuckDBAdapter as _Duck
+    from semantiql.knowledge.loader import load_model
+
+    (tmp_path / "ds.yml").write_text("version: 1\ndatasource: {name: w, dialect: duckdb}\n")
+    (tmp_path / "a.yml").write_text(
+        "tables:\n  orders:\n    source: orders\n"
+        "    description: One row per order line, not per order.\n"
+        "    dimensions:\n      channel: {column: channel, type: string}\n"
+        "    measures:\n      revenue: {column: amount, agg: sum}\n"
+    )
+    (tmp_path / "b.yml").write_text(
+        "tables:\n  tickets:\n    source: tickets\n"
+        "    measures:\n      n: {column: id, agg: count}\n"
+    )
+    return build_server(load_model(tmp_path), _Duck())
+
+
+def test_one_table_is_described_in_full_immediately(server: Any) -> None:
+    """Nothing to choose, so a second round trip would only cost a turn."""
+    described = _call(server, "describe_model")
+    assert [t["name"] for t in described["tables"]] == ["orders"]
+    assert [d["name"] for d in described["detail"]] == ["orders"]
+    assert described["next_step"] is None
+
+
+def test_several_tables_return_an_index_not_every_definition(big_server: Any) -> None:
+    """The scale property: one small reply regardless of how many tables exist."""
+    described = _call(big_server, "describe_model")
+    assert [t["name"] for t in described["tables"]] == ["orders", "tickets"]
+    assert described["detail"] == [], "definitions must not be sent unasked"
+    assert "describe_model" in (described["next_step"] or ""), "the reply must say what to do next"
+
+
+def test_the_index_carries_what_is_needed_to_choose(big_server: Any) -> None:
+    """Counts and a description — enough to pick a table, not enough to answer with."""
+    orders = next(t for t in _call(big_server, "describe_model")["tables"] if t["name"] == "orders")
+    assert orders["description"] == "One row per order line, not per order."
+    assert (orders["dimensions"], orders["measures"], orders["metrics"]) == (1, 1, 0)
+
+
+def test_naming_a_table_returns_its_definitions(big_server: Any) -> None:
+    described = _call(big_server, "describe_model", {"table": "orders"})
+    assert [d["name"] for d in described["detail"]] == ["orders"]
+    assert {e["name"] for e in described["detail"][0]["entities"]} == {"channel", "revenue"}
+    assert described["tables"], "the index stays present, so one shape covers both replies"
+
+
+def test_an_unknown_table_is_answered_with_the_real_ones(big_server: Any) -> None:
+    """The usual cause is a near-miss, and the fix is a retry rather than another round trip."""
+    described = _call(big_server, "describe_model", {"table": "order"})
+    assert described["detail"] == []
+    assert "orders" in described["next_step"] and "tickets" in described["next_step"]
+
+
+def test_the_tool_count_is_still_two(big_server: Any) -> None:
+    """This added an argument, not a tool. The surface is the enforcement boundary."""
+    assert sorted(_tools(big_server)) == ["describe_model", "query"]
+    schema = _tools(big_server)["describe_model"].input_schema
+    assert list(schema.get("properties", {})) == ["table"]
+    assert "table" not in schema.get("required", []), "omitting it must stay valid"

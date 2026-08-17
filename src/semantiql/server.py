@@ -80,6 +80,21 @@ class Entity(BaseModel):
     description: str | None = None
 
 
+class TableSummary(BaseModel):
+    """One line of the index: enough to choose a table, not enough to answer with.
+
+    The counts are deliberate. They tell Claude whether `orders` is the table carrying the revenue
+    measure without sending the measures, which is the whole trick that keeps a thirty-table model
+    describable in one small reply.
+    """
+
+    name: str
+    description: str | None = None
+    dimensions: int
+    measures: int
+    metrics: int
+
+
 class TableInfo(BaseModel):
     """One table's semantics. Physical column names are deliberately absent.
 
@@ -93,11 +108,23 @@ class TableInfo(BaseModel):
 
 
 class ModelInfo(BaseModel):
-    """What `describe_model` returns."""
+    """What `describe_model` returns — one shape whether or not detail was asked for.
+
+    `tables` is always the full index; `detail` carries entities for the table that was asked for,
+    or for the only table there is. A client branching on which *fields* are present would
+    eventually branch wrongly, so both are always there and `detail` is simply empty when there is
+    nothing to show — with `next_step` saying what to do about it.
+    """
 
     datasource: str
     dialect: str
-    tables: list[TableInfo]
+    tables: list[TableSummary] = Field(description="Every table, as an index.")
+    detail: list[TableInfo] = Field(
+        default_factory=list, description="Full entities for the requested table, if any."
+    )
+    next_step: str | None = Field(
+        default=None, description="What to call next when detail is empty."
+    )
 
 
 class Answer(BaseModel):
@@ -173,20 +200,57 @@ def build_server(model: SemanticModel, adapter: Adapter, *, version: str = "0.0.
     read_only = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True)
 
     @mcp.tool(annotations=read_only)
-    def describe_model() -> ModelInfo:
-        """List what can be asked: tables, and their dimensions, measures and metrics.
+    def describe_model(table: str | None = None) -> ModelInfo:
+        """List what can be asked. Call this before `query`.
 
-        Call this before `query`. The names it returns are the only ones that exist — anything
-        else is refused.
+        With no argument you get every table as an index — name, description, and how many
+        dimensions, measures and metrics each has. Pass a table name to get that table's
+        dimensions, measures and metrics in full.
+
+        The exception: a model with exactly one table returns it in full immediately, because
+        there is nothing to choose between.
+
+        The names returned are the only ones that exist. Anything else is refused.
         """
-        return ModelInfo(
-            datasource=model.datasource.name,
-            dialect=model.datasource.dialect,
-            tables=[
-                TableInfo(name=name, entities=_entities(model.tables[name]))
-                for name in model.table_names
-            ],
+        index = [
+            TableSummary(
+                name=name,
+                description=model.tables[name].description,
+                dimensions=len(model.tables[name].dimensions),
+                measures=len(model.tables[name].measures),
+                metrics=len(model.tables[name].metrics),
+            )
+            for name in model.table_names
+        ]
+        info = ModelInfo(
+            datasource=model.datasource.name, dialect=model.datasource.dialect, tables=index
         )
+
+        if table is not None:
+            if table not in model.tables:
+                # Answering with the available names rather than an empty reply: the usual cause is
+                # a near-miss, and the fix is one retry rather than another round trip to find out
+                # what exists.
+                info.next_step = (
+                    f"There is no table {table!r}. Available: "
+                    f"{', '.join(model.table_names)}. Call describe_model with one of those."
+                )
+                return info
+            wanted = [table]
+        elif len(model.table_names) == 1:
+            # Nothing to choose, so choosing would only cost a round trip.
+            wanted = model.table_names
+        else:
+            info.next_step = (
+                "Call describe_model again with `table` set to the one you need, to see its "
+                "dimensions, measures and metrics."
+            )
+            return info
+
+        info.detail = [
+            TableInfo(name=name, entities=_entities(model.tables[name])) for name in wanted
+        ]
+        return info
 
     @mcp.tool(annotations=read_only)
     def query(sql: str) -> Answer:
