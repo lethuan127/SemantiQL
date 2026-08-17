@@ -54,11 +54,11 @@ check everything the CI checks.
 ### Through Claude
 
 ```bash
-# Claude Code — install the plugin from plugin/, then:
-export SEMANTIQL_MODEL=/absolute/path/to/model.yml
+# Claude Desktop — build one file and open it; it asks for the model in a dialog
+uv run python scripts/build_bundle.py          # → dist/semantiql-<version>.mcpb
 
-# Claude Desktop — paste the printed block into claude_desktop_config.json:
-uv run semantiql serve -m model.yml --print-config
+# Claude Code — install the plugin from plugin/ (it also carries the skill), then:
+export SEMANTIQL_HOME=$PWD SEMANTIQL_MODEL=/absolute/path/to/model.yml
 ```
 
 The plugin ships the server *and* a skill that teaches Claude the dialect, how to repair a

@@ -226,7 +226,10 @@ be easier and would let the model reach the database by any route. Adding a thir
 design decision, not a convenience — and a refusal must keep travelling as a normal answer
 carrying its reason, because that reason is what lets Claude repair its own query.
 
-**`plugin/` is shipped product; `.claude/` is this repo's own tooling.** Don't mix them. And N6
+**`plugin/` and `bundle/` are shipped product; `.claude/` is this repo's own tooling.** Don't mix
+them. `bundle/` holds only a three-line entry point — `scripts/build_bundle.py` generates the
+manifest and copies the source at build time, so there is never a second copy of the package in
+git. `dist/` is build output and ignored. And N6
 applies to `plugin/skills/semantiql/SKILL.md` as much as to code: a skill that told Claude to add
 a missing metric would put the meaning tier under automatic change. It says stop, and
 `tests/test_plugin.py` asserts that it still does — along with asserting the grains it teaches are

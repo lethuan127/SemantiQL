@@ -30,6 +30,15 @@ EXAMPLE_MODEL = "examples/retail/semantic_model.yml"
 #: variable is the smallest thing the user has to set (spec 013).
 MODEL_ENV = "SEMANTIQL_MODEL"
 
+#: The rest of the connection, for the same reason. A Desktop bundle collects these in an install
+#: dialog and hands them over as environment variables, so every option that has a flag also has a
+#: variable (spec 014). Reading them here rather than in the bundle's entry point keeps the
+#: branching in code the ordinary suite covers — the entry point is three lines with nothing to
+#: get wrong.
+DATASOURCE_ENV = "SEMANTIQL_DATASOURCE"
+DSN_ENV = "SEMANTIQL_DSN"
+DATABASE_ENV = "SEMANTIQL_DATABASE"
+
 DEFAULT_DUCKDB = ":memory:"
 
 #: Verbs the docs and roadmap promise but that are not built yet. Without this, `semantiql
@@ -121,6 +130,18 @@ def _doctor(model_path: str, args: argparse.Namespace) -> int:
         return 1
     print(f"\n{tables} {noun} checked, no problems found.")
     return 0
+
+
+def _datasource_given(argv: list[str] | None) -> bool:
+    """Was `--datasource` passed explicitly?
+
+    `argparse` cannot tell a default from a flag that happened to match it, and the environment
+    must not silently override something the user typed. Inspecting the argument list is blunt and
+    it is the only thing that distinguishes the two.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+    return any(a == "--datasource" or a.startswith("--datasource=") for a in argv)
 
 
 def _connector_config(args: argparse.Namespace) -> dict[str, object]:
@@ -227,9 +248,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # An explicit flag always wins; then the environment; then the bundled example, so the
-    # README quickstart keeps working with no arguments at all.
+    # README quickstart keeps working with no arguments at all. Empty strings count as unset:
+    # a host substituting an optional field the user left blank yields "", not absence.
     if args.model is None:
         args.model = os.environ.get(MODEL_ENV) or EXAMPLE_MODEL
+    if args.dsn is None:
+        args.dsn = os.environ.get(DSN_ENV) or None
+    if args.database is None:
+        args.database = os.environ.get(DATABASE_ENV) or None
+    if not _datasource_given(argv):
+        args.datasource = os.environ.get(DATASOURCE_ENV) or args.datasource
+        if args.datasource not in ("duckdb", "postgres"):
+            parser.error(
+                f"{DATASOURCE_ENV}={args.datasource!r} is not a datasource; "
+                "use 'duckdb' or 'postgres'"
+            )
 
     # A flag meant for the other engine is an error rather than a silent no-op: quietly
     # ignoring `--dsn` would connect to DuckDB while the user believed they had reached

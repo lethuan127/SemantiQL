@@ -25,4 +25,5 @@ bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md)
 * [011-time-grain-timezones/](011-time-grain-timezones/) - T2, shipped - a time grain must not depend on the database server's timezone; found by 010's differential suite
 * [012-mcp-server/](012-mcp-server/) - T2, shipped - a local MCP server over stdio, so Claude writes the semantic SQL, reads refusals, and repairs
 * [013-plugin-and-skill/](013-plugin-and-skill/) - T2, shipped - a plugin bundling the MCP server and a skill, and the architecture doc that finally describes what Claude knows
+* [014-desktop-bundle/](014-desktop-bundle/) - T2, shipped - a relocatable .mcpb bundle that installs by opening it and asks for the model with a file picker
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above

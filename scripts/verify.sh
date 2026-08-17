@@ -54,6 +54,12 @@ uv run pytest -m "e2e and not pg" || fail "end-to-end tests"
 step "postgres, incl. TPC-H parity (pytest -m pg)"
 uv run pytest -m pg || fail "postgres differential tests"
 
+# The Desktop bundle is a shipped artifact, so a broken one should fail here rather than on
+# someone's desktop. Built into a temporary directory by the test suite; this step only proves the
+# script itself runs end to end and needs no network.
+step "desktop bundle (scripts/build_bundle.py)"
+uv run python scripts/build_bundle.py --out "$(mktemp -d)" >/dev/null || fail "bundle build"
+
 # The change records under specs/ are an OKF bundle; conformance errors are failures.
 # Absent Python yaml this validator degrades rather than lying, so it runs under uv too.
 if [ -f .claude/skills/okf/scripts/validate_bundle.py ] && [ -d specs ]; then

@@ -33,9 +33,14 @@ It never edits the model. Fixes are proposed to a human, per the two-tier rule i
 
 ## Flow B — End user (per person)
 
-1. Receive the connector block from the builder (`semantiql serve --print-config` produces it
-   with every path resolved) → paste into `claude_desktop_config.json`, restart Claude.
+1. Receive a `.mcpb` bundle from the builder → **open it**. Claude Desktop shows an install
+   dialog with a file picker for the model and a secret field for a Postgres connection string
+   (spec 014). No config file, no restart ceremony.
 2. Chat normally: *"Revenue this month by channel?"*
+
+The builder produces that file with `uv run python scripts/build_bundle.py`. The older route —
+`semantiql serve --print-config`, pasted into `claude_desktop_config.json` — still works and is
+what to fall back on when debugging.
 
 **Working today (spec 012), with one honest limit.** Claude calls `describe_model` to learn the
 vocabulary, writes semantic SQL, and reads a refusal and repairs it without the user seeing any

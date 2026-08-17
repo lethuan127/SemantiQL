@@ -36,6 +36,8 @@ tests/
 examples/retail/        the bundled example — and the unit suite's corpus. Not free to edit.
   orders.csv              ten rows whose totals are asserted by hand in tests/
   semantic_model.yml      the model the README quickstart runs, plus a `.postgres.yml` sibling
+bundle/                 the Claude Desktop bundle's committed parts
+  server.py               a three-line entry point; all the logic stays in cli.py, which is tested
 plugin/                 the shipped Claude plugin — installs the server *and* the skill
   .claude-plugin/         plugin.json manifest; the location is what makes it discoverable
   .mcp.json               how to launch the server, via ${CLAUDE_PLUGIN_ROOT} so it is portable
@@ -43,6 +45,7 @@ plugin/                 the shipped Claude plugin — installs the server *and* 
 compose.yaml            a throwaway Postgres for the `pg` suite; CI starts it from this file too
 scripts/
   verify.sh               the gate. One command CI and a contributor both run.
+  build_bundle.py         assembles dist/*.mcpb — generates the manifest, copies the source
   lint_commit_msg.py      commit-message rules, tested by tests/test_commit_msg_lint.py
   install-hooks.sh        points git at .githooks/
 .githooks/              pre-commit runs the gate; commit-msg runs the linter above

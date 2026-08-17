@@ -256,19 +256,26 @@ export SEMANTIQL_MODEL=/absolute/path/to/model.yml
 Nothing else to configure — the plugin locates this checkout through its own root, so it holds no
 path from your machine. See [plugin/README.md](../plugin/README.md).
 
-**Claude Desktop — paste a connector block.** Desktop uses a different packaging format, so the
-plugin does not install there:
+**Claude Desktop — build a bundle and open it.** Desktop takes a different packaging format from
+Claude Code, so the plugin does not install there. Build one file instead:
 
 ```bash
-uv run semantiql serve -m model.yml --datasource postgres --print-config
+uv run python scripts/build_bundle.py       # → dist/semantiql-<version>.mcpb
 ```
 
-That prints the block with **every path already absolute** — the model file and the interpreter.
-Paste it into `claude_desktop_config.json` (`~/Library/Application Support/Claude/` on macOS,
-`%APPDATA%\Claude\` on Windows), quit Claude Desktop completely, and reopen it. A **semantiql**
-connector appears with two tools, `query` and `describe_model`, both marked read-only. You get the
-server without the skill; the server carries the essential guidance in its own instructions, so
-this route works — it is just less well briefed.
+Open that file with Claude Desktop. It shows an install dialog: a **file picker** for your model, a
+datasource, and a Postgres connection string in a field marked secret so the host stores it rather
+than leaving it in a file. Nothing to paste, nothing to restart.
+
+The bundle carries SemantiQL's own source, so it works on a machine that has never installed it —
+and it is the file you send a colleague. See
+[../bundle/README.md](../bundle/README.md).
+
+You get the server without the skill; the server carries the essential guidance in its own
+instructions, so this route works — it is just less well briefed than the plugin.
+
+**Still debugging, or on another client?** `semantiql serve --print-config` prints the connector
+block with every path resolved, to paste into `claude_desktop_config.json` by hand.
 
 Then ask in English. Claude calls `describe_model` to learn your vocabulary, writes the semantic
 SQL, and — this is the part worth watching — when it gets a refusal it reads the reason and

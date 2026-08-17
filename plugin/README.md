@@ -11,23 +11,29 @@ opening a pull request.
 
 ## Install
 
-From a checkout of this repository:
+**This plugin is for Claude Code, and it needs a checkout to run against.** It carries
+configuration and markdown, not a Python environment, so it has to be told where SemantiQL itself
+lives. Two variables, set before Claude starts:
 
 ```bash
 git clone https://github.com/lethuan127/semantiql && cd semantiql && uv sync
+
+export SEMANTIQL_HOME=$PWD                              # where SemantiQL is installed
+export SEMANTIQL_MODEL=/absolute/path/to/your/model.yml  # which model to serve
 ```
 
-Then add the plugin from the `plugin/` directory of that checkout. The server definition locates
-the Python environment through the plugin's own root, so it works wherever the plugin is installed
-— nothing here contains a path from anyone's machine.
+Then add the plugin from that checkout's `plugin/` directory.
+
+**Why `SEMANTIQL_HOME` and not something automatic.** An earlier version of this file derived the
+checkout from the plugin's own location, assuming the plugin is always installed *from inside* the
+repository. Copy the plugin anywhere else — or unzip it — and that assumption silently points at a
+directory with no SemantiQL in it, and the server never appears. An explicit variable is worse to
+type and impossible to be quietly wrong about.
+
+If you want a single-file install with no checkout and no variables, that is a **bundle**, not a
+plugin — see below.
 
 ## Point it at your model
-
-One environment variable, set before Claude starts:
-
-```bash
-export SEMANTIQL_MODEL=/absolute/path/to/your/model.yml
-```
 
 Which model to serve is inherently yours, so it is the one thing the plugin cannot ship. Without
 it the bundled ten-row retail example is served — handy for trying the tools, and obviously not
@@ -58,8 +64,12 @@ remembers.
 
 ## Claude Desktop
 
-Claude Desktop uses a different packaging format from Claude Code, so this plugin does not install
-there. The supported route is still the connector block:
+Claude Desktop installs a **bundle** — a `.mcpb` zip you open, which prompts for the model file
+rather than asking you to set variables. It is built and documented in
+[`../bundle/README.md`](../bundle/README.md), and it is what to use on Desktop: unlike this plugin
+it carries the source, so it needs no checkout and no `SEMANTIQL_HOME`.
+
+The older route also still works:
 
 ```bash
 uv run semantiql serve -m /path/to/model.yml --print-config

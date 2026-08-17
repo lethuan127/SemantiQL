@@ -87,14 +87,20 @@ def test_the_server_definition_launches_semantiql_serve() -> None:
 
 
 def test_no_path_inside_the_plugin_comes_from_anyones_machine() -> None:
-    """The whole reason the plugin root is referenced through a variable.
+    """The whole reason the checkout is referenced through a variable.
 
     A hardcoded path works on the machine it was written on and nowhere else, and the failure is
     a server that never appears rather than an error anyone can read.
+
+    It was briefly `${CLAUDE_PLUGIN_ROOT}/..`, which derived the checkout from the plugin's own
+    location — correct only while the plugin is installed *from inside* the repository. Copy it
+    anywhere else and it silently points at a directory with no SemantiQL in it. An explicit
+    variable is worse to type and impossible to be quietly wrong about; the relocatable case is
+    served by the bundle instead (spec 014).
     """
     servers = _json(MCP_CONFIG)["mcpServers"]
-    assert any("${CLAUDE_PLUGIN_ROOT}" in a for a in servers["semantiql"]["args"]), (
-        "the checkout must be located through ${CLAUDE_PLUGIN_ROOT}, not a literal path"
+    assert any("${SEMANTIQL_HOME}" in a for a in servers["semantiql"]["args"]), (
+        "the checkout must be located through ${SEMANTIQL_HOME}, not a literal path"
     )
     for path in PLUGIN.rglob("*"):
         if path.is_dir() or path.suffix not in {".json", ".md"}:
