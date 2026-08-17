@@ -47,7 +47,7 @@ so `compose.yaml` provides a throwaway one:
 
 ```bash
 docker compose up -d --wait
-SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@localhost:55432/semantiql_test ./scripts/verify.sh
+SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@127.0.0.1:55432/semantiql_test ./scripts/verify.sh
 docker compose down
 ```
 

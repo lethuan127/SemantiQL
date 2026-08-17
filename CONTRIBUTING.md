@@ -114,7 +114,7 @@ number. They need a database, so the repo ships one:
 
 ```bash
 docker compose up -d --wait                      # postgres on 55432, data in memory
-SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@localhost:55432/semantiql_test \
+SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@127.0.0.1:55432/semantiql_test \
   uv run pytest -m pg
 docker compose down
 ```

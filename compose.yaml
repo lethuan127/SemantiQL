@@ -6,7 +6,7 @@
 # a database that belongs to this project and nothing else:
 #
 #     docker compose up -d --wait
-#     SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@localhost:55432/semantiql_test \
+#     SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@127.0.0.1:55432/semantiql_test \
 #       ./scripts/verify.sh
 #     docker compose down
 #
@@ -25,8 +25,9 @@ name: semantiql-test
 services:
   postgres:
     # Pinned to a major so an upstream release never breaks a build nobody changed.
-    # **Keep this in step with `.github/workflows/ci.yml`**, which runs the same suite against
-    # its own service container; the two are separate mechanisms testing one contract.
+    # **This is the only pin.** CI starts the database with `docker compose up -d --wait` from
+    # this same file, so the image, the port and the database name have one definition rather
+    # than a copy in the workflow that someone has to remember to update.
     image: postgres:17
 
     environment:
