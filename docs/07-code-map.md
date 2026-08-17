@@ -36,6 +36,10 @@ tests/
 examples/retail/        the bundled example — and the unit suite's corpus. Not free to edit.
   orders.csv              ten rows whose totals are asserted by hand in tests/
   semantic_model.yml      the model the README quickstart runs, plus a `.postgres.yml` sibling
+plugin/                 the shipped Claude plugin — installs the server *and* the skill
+  .claude-plugin/         plugin.json manifest; the location is what makes it discoverable
+  .mcp.json               how to launch the server, via ${CLAUDE_PLUGIN_ROOT} so it is portable
+  skills/semantiql/       SKILL.md — how Claude should work. Pinned to the engine by tests.
 compose.yaml            a throwaway Postgres for the `pg` suite; CI starts it from this file too
 scripts/
   verify.sh               the gate. One command CI and a contributor both run.
@@ -44,7 +48,10 @@ scripts/
 .githooks/              pre-commit runs the gate; commit-msg runs the linter above
 ```
 
-Two of those are easier to break than they look.
+Two of those are easier to break than they look — three, counting `plugin/skills/`, which is
+**not** the same thing as `.claude/skills/`: the first is shipped product, the second is this
+repo's own development tooling (`okf`, `sdd`). Keeping them apart is the only way anyone can tell
+which is which.
 
 **`examples/retail/` is test data, not sample data.** The unit suite asserts totals computed by
 hand from `orders.csv` — change a row and tests fail for a reason that has nothing to do with

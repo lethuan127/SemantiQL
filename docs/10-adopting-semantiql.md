@@ -243,17 +243,32 @@ project exists to prevent.
 
 ## Step 7 — Ask through Claude instead
 
-Once the model resolves, stop writing SQL yourself:
+Once the model resolves, stop writing SQL yourself. Two routes, depending on your client.
+
+**Claude Code — install the plugin.** `plugin/` in this repo carries the MCP server definition and
+a skill that teaches Claude the dialect and what to do with a refusal. Point it at your model with
+one environment variable:
+
+```bash
+export SEMANTIQL_MODEL=/absolute/path/to/model.yml
+```
+
+Nothing else to configure — the plugin locates this checkout through its own root, so it holds no
+path from your machine. See [plugin/README.md](../plugin/README.md).
+
+**Claude Desktop — paste a connector block.** Desktop uses a different packaging format, so the
+plugin does not install there:
 
 ```bash
 uv run semantiql serve -m model.yml --datasource postgres --print-config
 ```
 
-That prints a connector block with **every path already absolute** — the model file and the
-interpreter. Paste it into `claude_desktop_config.json`
-(`~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows), quit
-Claude Desktop completely, and reopen it. A **semantiql** connector appears with two tools,
-`query` and `describe_model`, both marked read-only.
+That prints the block with **every path already absolute** — the model file and the interpreter.
+Paste it into `claude_desktop_config.json` (`~/Library/Application Support/Claude/` on macOS,
+`%APPDATA%\Claude\` on Windows), quit Claude Desktop completely, and reopen it. A **semantiql**
+connector appears with two tools, `query` and `describe_model`, both marked read-only. You get the
+server without the skill; the server carries the essential guidance in its own instructions, so
+this route works — it is just less well briefed.
 
 Then ask in English. Claude calls `describe_model` to learn your vocabulary, writes the semantic
 SQL, and — this is the part worth watching — when it gets a refusal it reads the reason and

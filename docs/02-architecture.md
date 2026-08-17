@@ -1,11 +1,54 @@
-# Architecture — 4 layers
+# Architecture
+
+## Three components
+
+Start here, because the four layers below sit inside the third one. A working SemantiQL is three
+things, and it is worth naming them separately because they answer three different questions and
+they live in three different places.
 
 ```
-┌─────────────────────────────────────────────┐
-│  AI agent (Claude via MCP, or any LLM)      │
-│  asks in semantic SQL                       │
-└──────────────────┬──────────────────────────┘
-                   ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│ 1. Claude + skill             │   │ 2. Knowledge                  │
+│                               │   │                               │
+│ HOW to work: call             │   │ WHAT the words mean:          │
+│ describe_model first, write   │──▶│ dimensions, measures,         │
+│ the supported subset, repair  │   │ metrics — one agreed          │
+│ a refusal, and stop at a      │   │ definition each               │
+│ definition that is missing    │   │                               │
+│                               │   │                               │
+│ plugin/skills/semantiql/      │   │ the semantic model YAML       │
+│ SKILL.md — in git             │   │ — in git                      │
+└───────────────────────────────┘   └───────────────────────────────┘
+                │  two read-only tools              │  resolves against
+                ▼                                   ▼
+┌───────────────────────────────────────────────────────────────────┐
+│ 3. Execution — what may actually be run                           │
+│                                                                   │
+│ describe_model · query            src/semantiql/server.py         │
+│ ───────────────────────────────────────────────────────────────── │
+│ the four layers below                                             │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+**Why the first one is a component and not a footnote.** It decides whether Claude looks up the
+vocabulary before guessing, and whether a refusal becomes a repaired query or an apology. That is
+behaviour, it is version-controlled, and it is reviewable in a pull request — so it belongs in the
+architecture rather than being assumed. It used to be a string literal inside `server.py`; spec 013
+gave it a file.
+
+**Why the third one is deliberately small.** Two read-only tools, and nothing else. A skill telling
+Claude to run the CLI in a shell would have been easier to build and would also have handed it a
+shell, from which the database is reachable by any route. The tool surface *is* the enforcement
+boundary — which is why widening it is a decision rather than a convenience.
+
+**Where the boundary between 1 and 2 is absolute.** The skill may teach Claude anything about *how
+to ask*. It may never let Claude change what a number *means*. A missing metric is reported and the
+conversation stops; adding it is a reviewed change to a file in git (N6). Blur that line and
+"revenue means one thing here" stops being true.
+
+## The four layers, inside execution
+
+```
 ┌─────────────────────────────────────────────┐
 │  1. Semantic Knowledge                      │
 ├─────────────────────────────────────────────┤

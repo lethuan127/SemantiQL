@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "semantiql": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}/..",
+        "semantiql",
+        "serve"
+      ]
+    }
+  }
+}

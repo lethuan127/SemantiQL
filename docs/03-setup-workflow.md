@@ -4,11 +4,11 @@ Two roles, two flows.
 
 ## Flow A — Builder (data analyst, done once)
 
-1. **Install & init:** `uvx semantiql init` — a CLI wizard that asks step by step; no docs required upfront. Until the first release is published, the working path is from source: `git clone` → `uv sync` → `uv run semantiql`.
+1. **Install:** `git clone` → `uv sync`. (`uvx semantiql` resolves an older published build, and `semantiql init` is not built — see below.) Then install the plugin from `plugin/`, which registers the MCP server *and* the skill that teaches Claude how to use it (spec 013). For Claude Desktop, which takes a different packaging format, use `semantiql serve --print-config` and paste the block it prints.
 2. **Connect the database:** paste a connection string (a **read-only** account is recommended). The tool verifies the connection automatically.
 3. **Auto-generate the semantic model:** the tool introspects the schema and generates a draft YAML (dimensions, measures, descriptions). AI assists with business-friendly naming and descriptions.
 4. **Review & edit the YAML:** hide sensitive columns, add business metrics, fix descriptions. This human step is mandatory — semantic model quality determines answer quality.
-5. **Export the Claude connection + verify:** the tool produces a bundle for one-click install into Claude Desktop and runs ~5 sample questions to confirm correct answers.
+5. **Point Claude at it + verify:** set `SEMANTIQL_MODEL` to the model's absolute path, then run `semantiql doctor` and confirm it exits 0. Running ~5 sample questions to confirm the *answers* is still unbuilt — see below.
 
 ### What `semantiql doctor` does today
 

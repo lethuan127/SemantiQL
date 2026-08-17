@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -22,6 +23,12 @@ from semantiql.knowledge.loader import ModelError, load_model
 from semantiql.server import serve
 
 EXAMPLE_MODEL = "examples/retail/semantic_model.yml"
+
+#: Where `-m` looks before falling back to the bundled example. It exists for the plugin: which
+#: model to serve is inherently per-user, so it cannot be committed into a file the plugin ships,
+#: and a client that launches the server does not offer a place to type a flag. One environment
+#: variable is the smallest thing the user has to set (spec 013).
+MODEL_ENV = "SEMANTIQL_MODEL"
 
 DEFAULT_DUCKDB = ":memory:"
 
@@ -186,8 +193,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-m",
         "--model",
-        default=EXAMPLE_MODEL,
-        help=f"path to the semantic model YAML (default: {EXAMPLE_MODEL})",
+        default=None,
+        help=f"path to the semantic model YAML (default: ${MODEL_ENV} if set, "
+        f"otherwise {EXAMPLE_MODEL})",
     )
     parser.add_argument("--show-sql", action="store_true", help="print the generated physical SQL")
     parser.add_argument(
@@ -217,6 +225,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     # Exit codes: 0 ok · 1 refused (the request is not answerable) · 2 bad model · 3 datasource
     args = parser.parse_args(argv)
+
+    # An explicit flag always wins; then the environment; then the bundled example, so the
+    # README quickstart keeps working with no arguments at all.
+    if args.model is None:
+        args.model = os.environ.get(MODEL_ENV) or EXAMPLE_MODEL
 
     # A flag meant for the other engine is an error rather than a silent no-op: quietly
     # ignoring `--dsn` would connect to DuckDB while the user believed they had reached

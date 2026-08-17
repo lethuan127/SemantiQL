@@ -220,11 +220,17 @@ So you don't propose these as bugs: schema introspection (`semantiql init`), the
 benchmark, the self-improvement loop, and the Data Governance layer (layer 3 — named in the code
 map, deliberately unimplemented).
 
-The MCP server ships (spec 012) with exactly **two** read-only tools, `describe_model` and
-`query`. That surface is the enforcement boundary, not a starting set: a shell-based skill would
+The MCP server ships (spec 012), packaged as a plugin with a skill (spec 013), with exactly
+**two** read-only tools, `describe_model` and `query`. That surface is the enforcement boundary, not a starting set: a shell-based skill would
 be easier and would let the model reach the database by any route. Adding a third tool is a
 design decision, not a convenience — and a refusal must keep travelling as a normal answer
 carrying its reason, because that reason is what lets Claude repair its own query.
+
+**`plugin/` is shipped product; `.claude/` is this repo's own tooling.** Don't mix them. And N6
+applies to `plugin/skills/semantiql/SKILL.md` as much as to code: a skill that told Claude to add
+a missing metric would put the meaning tier under automatic change. It says stop, and
+`tests/test_plugin.py` asserts that it still does — along with asserting the grains it teaches are
+exactly the grains `validate` accepts.
 
 Two decisions are open and should be flagged rather than silently resolved: auth for a
 shared multi-user server, and Open Semantic Interchange compatibility for the model YAML.

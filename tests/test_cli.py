@@ -170,3 +170,33 @@ def test_an_unreachable_postgres_exits_three_with_a_fix_hint(
     assert code == 3
     assert "could not connect to Postgres" in err
     assert "check the server is running" in err
+
+
+# --- Where the model path comes from (spec 013). The plugin cannot ship a per-user path, so the
+# environment is the smallest thing a user has to set.
+
+
+def test_an_explicit_model_flag_wins(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SEMANTIQL_MODEL", "/nonexistent/should-be-ignored.yml")
+    assert main(["SELECT revenue FROM orders", "-m", "examples/retail/semantic_model.yml"]) == 0
+    assert "1686.24" in capsys.readouterr().out
+
+
+def test_the_environment_supplies_the_model_when_no_flag_is_given(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """How the plugin points the server at a model without committing a path."""
+    monkeypatch.setenv("SEMANTIQL_MODEL", "examples/retail/semantic_model.yml")
+    assert main(["SELECT revenue FROM orders"]) == 0
+    assert "1686.24" in capsys.readouterr().out
+
+
+def test_the_bundled_example_is_the_last_resort(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The README quickstart takes no arguments, so this default must not move."""
+    monkeypatch.delenv("SEMANTIQL_MODEL", raising=False)
+    assert main(["SELECT revenue FROM orders"]) == 0
+    assert "1686.24" in capsys.readouterr().out

@@ -54,8 +54,15 @@ check everything the CI checks.
 ### Through Claude
 
 ```bash
-uv run semantiql serve -m model.yml --print-config     # paste into claude_desktop_config.json
+# Claude Code — install the plugin from plugin/, then:
+export SEMANTIQL_MODEL=/absolute/path/to/model.yml
+
+# Claude Desktop — paste the printed block into claude_desktop_config.json:
+uv run semantiql serve -m model.yml --print-config
 ```
+
+The plugin ships the server *and* a skill that teaches Claude the dialect, how to repair a
+refusal, and to stop rather than invent a definition the model does not have.
 
 Claude then calls `describe_model` to learn your vocabulary and `query` to answer — and when a
 question names something your model does not define, it reads the refusal and either fixes the

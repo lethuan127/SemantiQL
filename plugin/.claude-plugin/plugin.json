@@ -1,0 +1,11 @@
+{
+  "name": "semantiql",
+  "version": "0.0.2",
+  "description": "Ask questions about a SQL database in plain language, through a reviewed semantic model that refuses rather than guesses.",
+  "author": {
+    "name": "Thuan Le"
+  },
+  "repository": "https://github.com/lethuan127/semantiql",
+  "license": "MIT",
+  "keywords": ["semantic-layer", "sql", "duckdb", "postgres", "analytics"]
+}
