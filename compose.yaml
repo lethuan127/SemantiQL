@@ -1,0 +1,57 @@
+# A throwaway Postgres for the `pg` test suite.
+#
+# The Postgres suites need a database this repository cannot bundle. Without this file each
+# contributor pointed `SEMANTIQL_TEST_DSN` at whatever Postgres they happened to be running,
+# which made the suite depend on a machine rather than on the repo. One command now brings up
+# a database that belongs to this project and nothing else:
+#
+#     docker compose up -d --wait
+#     SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@localhost:55432/semantiql_test \
+#       ./scripts/verify.sh
+#     docker compose down
+#
+# **The verify gate does not require this.** With no `SEMANTIQL_TEST_DSN` set, the `pg` step
+# skips with a stated reason and the gate still passes — a fresh clone must run with nothing
+# installed, and wiring Docker into the gate would quietly end that. This file makes the
+# Postgres suite easy to run, never mandatory.
+#
+# There is no seed SQL here on purpose. The corpora are built by the test fixtures — the retail
+# rows from `examples/retail/orders.csv`, the TPC-H corpus from DuckDB's `dbgen` — so the data
+# has exactly one definition. Seeding from SQL files as well would mean two, and they would
+# drift the first time either changed.
+
+name: semantiql-test
+
+services:
+  postgres:
+    # Pinned to a major so an upstream release never breaks a build nobody changed.
+    # **Keep this in step with `.github/workflows/ci.yml`**, which runs the same suite against
+    # its own service container; the two are separate mechanisms testing one contract.
+    image: postgres:17
+
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      # A database named for this project, so a stray connection is obvious in `\l` output.
+      POSTGRES_DB: semantiql_test
+
+    ports:
+      # **55432, not 5432, and that is a safety measure rather than a preference.** The test
+      # fixtures issue `DROP TABLE IF EXISTS` before loading each corpus. On the default port a
+      # forgotten `SEMANTIQL_TEST_DSN`, or a DSN pasted from somewhere else, could point that at
+      # a database someone cares about. An unusual port means the tests reach this container or
+      # they reach nothing.
+      - "127.0.0.1:55432:5432"
+
+    # The corpus is rebuilt every session, so persisting it buys nothing and costs a class of
+    # bug where yesterday's data explains today's result. In memory is also markedly faster.
+    tmpfs:
+      - /var/lib/postgresql/data
+
+    healthcheck:
+      # `--wait` above blocks on this, so the tests never race a database that is still starting.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d semantiql_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 3s

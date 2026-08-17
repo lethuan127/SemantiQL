@@ -90,7 +90,7 @@ uv run ruff check --fix .                        # fix what is safely fixable
 uv run mypy                                      # types (strict)
 ```
 
-### The two test suites
+### The three test suites
 
 **Unit tests** run against `examples/retail/` — ten rows whose expected totals were computed
 by hand. They are exact, they need nothing installed, and they are what you run on every save.
@@ -107,6 +107,23 @@ SEMANTIQL_E2E_SF=1 uv run pytest -m e2e         # six million rows, for a soak r
 Building the corpus uses DuckDB's `tpch` extension, which is fetched once from DuckDB's
 extension repository. **With no network on a first run the suite skips rather than fails** —
 the clone still has to work on a plane — so if you see it skip, that is why.
+
+**Postgres tests** (marked `pg`) ask the same questions on DuckDB *and* Postgres and fail if the
+two disagree — the only check that can catch a dialect bug that returns a plausible wrong
+number. They need a database, so the repo ships one:
+
+```bash
+docker compose up -d --wait                      # postgres on 55432, data in memory
+SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@localhost:55432/semantiql_test \
+  uv run pytest -m pg
+docker compose down
+```
+
+Two things worth knowing. The port is **55432 rather than 5432 on purpose**: the fixtures
+`DROP TABLE` before loading each corpus, and an unusual port means a mistyped or pasted DSN
+reaches this container or nothing at all. And **the gate never requires Docker** — with
+`SEMANTIQL_TEST_DSN` unset the `pg` step skips with a stated reason and `./scripts/verify.sh`
+still passes, because a fresh clone has to run with nothing installed.
 
 ## What makes a pull request mergeable
 

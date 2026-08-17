@@ -38,10 +38,22 @@ uv run ruff format . && uv run ruff check --fix .                  # fix style
 uv run mypy                                                        # strict
 ```
 
-Two suites. `tests/*.py` run against the ten-row `examples/retail/` corpus with hand-computed
+Three suites. `tests/*.py` run against the ten-row `examples/retail/` corpus with hand-computed
 totals. `tests/e2e/` generates a TPC-H corpus and checks the engine against hand-written
 physical SQL — scale it with `SEMANTIQL_E2E_SF`, and expect it to skip offline on a first run
-because the generator extension is fetched once from DuckDB's repository.
+because the generator extension is fetched once from DuckDB's repository. The `pg` suite runs
+the same questions on DuckDB **and** Postgres and fails if they disagree; it needs a database,
+so `compose.yaml` provides a throwaway one:
+
+```bash
+docker compose up -d --wait
+SEMANTIQL_TEST_DSN=postgresql://postgres:postgres@localhost:55432/semantiql_test ./scripts/verify.sh
+docker compose down
+```
+
+Without `SEMANTIQL_TEST_DSN` the `pg` step **skips with a stated reason and the gate still
+passes** — that is deliberate and load-bearing (spec 010, FR-11), so never make the gate depend
+on Docker.
 
 `./scripts/verify.sh` must pass before you propose a change. It stops at the first failure
 and names the step.
