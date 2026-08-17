@@ -424,3 +424,36 @@ def test_without_a_declaration_the_bucket_is_at_the_servers_mercy(
         f"expected the bucket to move with the server timezone, got {seen} — if this stops "
         "reproducing, the sweep above no longer proves the declared zone is doing the work"
     )
+
+
+def test_the_connection_does_not_sit_in_a_transaction(postgres_adapter: PostgresAdapter) -> None:
+    """After an answer, the connection is `idle` — not `idle in transaction` (spec 012).
+
+    `autocommit` stays False because that is what makes `read_only` real, and the cost is that
+    a fetched-but-unclosed transaction pins a snapshot and blocks vacuum on every table it
+    read. Harmless for a CLI that opens, asks and closes; not harmless for the MCP server,
+    which holds one connection for as long as the conversation lasts.
+
+    Nothing else in the suite would catch a regression here: the answers stay correct either
+    way, and the damage is to the database rather than to the number. So the backend state is
+    asserted directly.
+    """
+    import psycopg
+
+    adapter_pid = postgres_adapter._conn.info.backend_pid
+    postgres_adapter.execute("SELECT 1")
+
+    observer = psycopg.connect(postgres_adapter._conn.info.dsn)
+    observer.autocommit = True
+    try:
+        row = observer.execute(
+            "SELECT state FROM pg_stat_activity WHERE pid = %s", (adapter_pid,)
+        ).fetchone()
+    finally:
+        observer.close()
+
+    assert row is not None
+    assert row[0] == "idle", (
+        f"backend is {row[0]!r} — the read-only transaction was left open, so a long-lived "
+        "server would pin a snapshot. execute() must end it after fetching."
+    )

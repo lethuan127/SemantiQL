@@ -7,8 +7,11 @@ goes through that one function, so the CLI cannot become a way around validation
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
+from semantiql import __version__
 from semantiql.adapters.base import Adapter, AdapterError
 from semantiql.adapters.duckdb import DuckDBAdapter
 from semantiql.adapters.postgres import PostgresAdapter
@@ -16,6 +19,7 @@ from semantiql.doctor import Finding, check, problems
 from semantiql.engine.run import Result, run
 from semantiql.engine.validate import Refusal
 from semantiql.knowledge.loader import ModelError, load_model
+from semantiql.server import serve
 
 EXAMPLE_MODEL = "examples/retail/semantic_model.yml"
 
@@ -112,6 +116,62 @@ def _doctor(model_path: str, args: argparse.Namespace) -> int:
     return 0
 
 
+def _connector_config(args: argparse.Namespace) -> dict[str, object]:
+    """The `mcpServers` block for Claude Desktop, with every path already absolute.
+
+    Absolute paths are not tidiness. The MCP client documentation names relative paths as a
+    leading cause of a server that simply never appears, and Claude Desktop launches the
+    process without the user's shell or PATH — so a bare `semantiql` or a relative model path
+    resolves against something nobody chose. Both are the values this process already knows,
+    so it fills them in rather than asking a human to.
+
+    A password is deliberately absent. Postgres credentials travel through libpq's own
+    environment and `~/.pgpass`, which is how they stay out of a JSON file that gets pasted
+    into chat windows.
+    """
+    invocation = [sys.executable, "-m", "semantiql", "serve"]
+    invocation += ["-m", str(Path(args.model).resolve())]
+    invocation += ["--datasource", args.datasource]
+    if args.datasource == "postgres":
+        if args.dsn:
+            invocation += ["--dsn", args.dsn]
+    elif args.database:
+        invocation += ["--database", str(Path(args.database).resolve())]
+
+    return {
+        "mcpServers": {
+            "semantiql": {
+                "command": invocation[0],
+                "args": invocation[1:],
+            }
+        }
+    }
+
+
+def _serve(args: argparse.Namespace) -> int:
+    """Run the MCP server. Fails at startup rather than answering every question with an error.
+
+    Both failures a first-time user hits — an unloadable model and an unreachable datasource —
+    happen here, before the server accepts anything, and exit with the same codes the query
+    path uses. A server that starts successfully can answer.
+    """
+    try:
+        model = load_model(args.model)
+    except ModelError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        adapter = _open_adapter(args)
+    except AdapterError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
+    # `serve` closes the adapter itself, on the way out of the stdio loop.
+    serve(model, adapter, version=__version__)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="semantiql",
@@ -120,7 +180,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "sql",
         nargs="?",
-        help="semantic SQL, e.g. 'SELECT revenue, channel FROM orders' — or the verb 'doctor'",
+        help="semantic SQL, e.g. 'SELECT revenue, channel FROM orders' — or a verb: "
+        "'doctor', 'serve'",
     )
     parser.add_argument(
         "-m",
@@ -148,6 +209,12 @@ def main(argv: list[str] | None = None) -> int:
         "omit it to use libpq's environment (PGHOST, PGUSER, .pgpass), which keeps a password "
         "out of your shell history",
     )
+    parser.add_argument(
+        "--print-config",
+        action="store_true",
+        help="with 'serve': print the Claude Desktop connector block instead of running, with "
+        "every path resolved absolute",
+    )
     # Exit codes: 0 ok · 1 refused (the request is not answerable) · 2 bad model · 3 datasource
     args = parser.parse_args(argv)
 
@@ -166,6 +233,12 @@ def main(argv: list[str] | None = None) -> int:
     verb = args.sql.strip().lower()
     if verb == "doctor":
         return _doctor(args.model, args)
+
+    if verb == "serve":
+        if args.print_config:
+            print(json.dumps(_connector_config(args), indent=2))
+            return 0
+        return _serve(args)
 
     if verb in NOT_YET_IMPLEMENTED:
         print(

@@ -19,6 +19,8 @@ src/semantiql/
     postgres.py    Postgres; tables and views only, read-only connection
   doctor.py      checks a model against the database — `semantiql doctor`
   cli.py         the `semantiql` command
+  server.py      the MCP server — two read-only tools over stdio, `semantiql serve`
+  __main__.py    lets `python -m semantiql` work, so a connector config can name an interpreter
 ```
 
 Everything outside `src/` that a change is likely to touch:
@@ -61,6 +63,11 @@ Both skips are deliberate and load-bearing: a fresh clone has to pass the gate w
 installed and no network. Never make either a hard failure, and never make the gate require
 Docker — `compose.yaml` exists to make the `pg` suite *easy*, not mandatory.
 
+`server.py` and `cli.py` are **callers**, not layers. Both reach data only through
+`engine.run.run`, and the server's tool surface is deliberately two calls wide: those two are
+the only things a client can do, which is what makes the boundary structural rather than a rule
+someone remembers. Adding a third widens it.
+
 `doctor.py` sits beside the layers rather than inside one: it reads a model and a datasource's
 schema, and it is deliberately **not** in `engine/`, because the engine has exactly one path to
 data and a checker living next to it would blur that. It reads metadata, never rows.
@@ -80,6 +87,7 @@ module that looks like a feature.
 | Support a new database | one new file in `adapters/` — **and nothing else** |
 | A new CLI verb | `cli.py`, routing through `engine.run.run` |
 | A new model-versus-reality check | `doctor.py` |
+| A new tool Claude can call | `server.py` — and think hard first: those tools are the whole boundary |
 | A new check in the gate | `scripts/verify.sh` — as its own step, so its cost and any skip are visible |
 | A test that needs a database | `tests/` with `pytest.mark.pg`, and it must **skip** when there is none |
 | A bigger or different corpus | `tests/e2e/conftest.py` — never `examples/retail/`, whose totals are asserted by hand |

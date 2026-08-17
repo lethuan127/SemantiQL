@@ -17,11 +17,12 @@ checks a model you wrote against the real database and tells you precisely what 
 turns model-writing from guesswork into a short correct-the-errors loop, but it is still you
 writing the first draft.
 
-**You cannot hand this to a non-technical colleague yet.** The MCP server that puts SemantiQL
-inside Claude is **not built**. Today the interface is a command line that takes semantic SQL.
-So the honest description of who this is for right now is: *an analyst or engineer who wants
-one sanctioned definition of their metrics, enforced.* The chat interface is the next milestone,
-not a current feature.
+**There is a Claude interface, and there is a limit to it.** `semantiql serve` runs an MCP
+server, so you can ask questions in English through Claude Desktop rather than writing semantic
+SQL — see [Step 7](#step-7--ask-through-claude-instead). The limit: the server runs **locally**,
+so whoever chats needs SemantiQL installed and database access. That is fine for you and for
+teammates who already query the database; it is not yet the non-technical colleague with no
+credentials. That needs a remote server, which is deliberately post-MVP.
 
 **Install from source, not from PyPI.** There is a published `semantiql` on PyPI, and at the time
 of writing it is **behind this repository** — it predates both `semantiql doctor` and the Postgres
@@ -240,7 +241,29 @@ refused: 'profit' is not defined on table 'subscriptions'.
 is refused rather than answered plausibly — a wrong number nobody can detect is the failure this
 project exists to prevent.
 
-## Step 7 — Grow the model
+## Step 7 — Ask through Claude instead
+
+Once the model resolves, stop writing SQL yourself:
+
+```bash
+uv run semantiql serve -m model.yml --datasource postgres --print-config
+```
+
+That prints a connector block with **every path already absolute** — the model file and the
+interpreter. Paste it into `claude_desktop_config.json`
+(`~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on Windows), quit
+Claude Desktop completely, and reopen it. A **semantiql** connector appears with two tools,
+`query` and `describe_model`, both marked read-only.
+
+Then ask in English. Claude calls `describe_model` to learn your vocabulary, writes the semantic
+SQL, and — this is the part worth watching — when it gets a refusal it reads the reason and
+fixes its own query. Ask for something your model does not define and it tells you so instead of
+inventing a number.
+
+Note there is no password in that block. Postgres credentials stay in libpq's environment and
+`~/.pgpass`, which is what keeps them out of a JSON file people paste into chat windows.
+
+## Step 8 — Grow the model
 
 Now add the things that make it worth having: a metric with one sanctioned definition, so
 "revenue per customer" means the same thing to everyone who asks.

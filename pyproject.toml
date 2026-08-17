@@ -23,6 +23,10 @@ dependencies = [
   "psycopg[binary]>=3.1",
   "pydantic>=2.6",
   "pyyaml>=6",
+  # The Claude-facing interface (constitution's tech stack). Plain `mcp`, not `mcp[cli]`:
+  # the extra adds `mcp dev`/`run`/`install`, which this project does not need — it has its
+  # own CLI and its own gate (spec 012, clarification Q7).
+  "mcp>=2,<3",
 ]
 
 [project.scripts]

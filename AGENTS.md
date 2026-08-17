@@ -216,9 +216,15 @@ Documentation-only work and mechanical fixes are deliberately outside that lifec
 
 ## Not yet built
 
-So you don't propose these as bugs: the MCP server, schema introspection (`semantiql init`),
-the accuracy benchmark, the self-improvement loop, and the Data Governance layer (layer 3 —
-named in the code map, deliberately unimplemented).
+So you don't propose these as bugs: schema introspection (`semantiql init`), the accuracy
+benchmark, the self-improvement loop, and the Data Governance layer (layer 3 — named in the code
+map, deliberately unimplemented).
+
+The MCP server ships (spec 012) with exactly **two** read-only tools, `describe_model` and
+`query`. That surface is the enforcement boundary, not a starting set: a shell-based skill would
+be easier and would let the model reach the database by any route. Adding a third tool is a
+design decision, not a convenience — and a refusal must keep travelling as a normal answer
+carrying its reason, because that reason is what lets Claude repair its own query.
 
 Two decisions are open and should be flagged rather than silently resolved: auth for a
 shared multi-user server, and Open Semantic Interchange compatibility for the model YAML.

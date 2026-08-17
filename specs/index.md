@@ -23,4 +23,5 @@ bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md)
 * [009-doctor/](009-doctor/) - T2, shipped - a health check that finds where the model and the real schema disagree
 * [010-postgres-adapter/](010-postgres-adapter/) - T2, shipped - a Postgres adapter that proves N4 with a second engine, and the differential suite that shows the same model answers the same on both
 * [011-time-grain-timezones/](011-time-grain-timezones/) - T2, shipped - a time grain must not depend on the database server's timezone; found by 010's differential suite
+* [012-mcp-server/](012-mcp-server/) - T2, shipped - a local MCP server over stdio, so Claude writes the semantic SQL, reads refusals, and repairs
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above

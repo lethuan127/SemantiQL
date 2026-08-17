@@ -183,7 +183,19 @@ class PostgresAdapter:
             with self._conn.cursor() as cur:
                 cur.execute(sql)
                 names = [d.name for d in cur.description or []]
-                return names, [tuple(r) for r in cur.fetchall()]
+                rows = [tuple(r) for r in cur.fetchall()]
+            # End the transaction now that the rows are in hand. `autocommit` is False because
+            # that is what makes `read_only` real (see __init__), and the cost is that the
+            # connection would otherwise sit `idle in transaction` — pinning a snapshot and
+            # blocking vacuum on every table it read. Invisible for a CLI that opens, asks and
+            # closes; not invisible for the MCP server, which holds one connection open for as
+            # long as the conversation lasts (spec 012).
+            #
+            # `rollback` rather than `commit` because there is nothing to commit: the
+            # transaction is read-only. Measured, so nobody has to trust it — read-only
+            # enforcement survives this and the connection stays usable.
+            self._conn.rollback()
+            return names, rows
         except psycopg.Error as exc:
             # Postgres leaves the transaction aborted after an error, so every later statement
             # on this connection would fail with a message about the *transaction* rather than

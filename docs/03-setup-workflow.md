@@ -23,18 +23,26 @@ so a setup script can stop rather than report success.
 uv run semantiql doctor -m model.yml --database warehouse.duckdb
 ```
 
-**What it does not do yet:** run sample questions to confirm the *answers* are right. That
-needs the MCP bundle from step 5, which is not built — so doctor currently verifies that the
-model fits the database, not that the model answers well. The accuracy half arrives with the
-MCP server.
+**What it does not do yet:** run sample questions to confirm the *answers* are right. doctor
+verifies that the model fits the database, not that it answers well. The MCP server now exists
+(spec 012), so the pieces are there — a `doctor --ask` that runs a few questions through the
+server and reports the answers is the remaining step, and it is not built.
 
 It never edits the model. Fixes are proposed to a human, per the two-tier rule in
 [04-self-improvement.md](04-self-improvement.md).
 
-## Flow B — End user (non-technical, per person)
+## Flow B — End user (per person)
 
-1. Receive the bundle/link from the builder → install into Claude Desktop (double-click).
+1. Receive the connector block from the builder (`semantiql serve --print-config` produces it
+   with every path resolved) → paste into `claude_desktop_config.json`, restart Claude.
 2. Chat normally: *"Revenue this month by channel?"*
+
+**Working today (spec 012), with one honest limit.** Claude calls `describe_model` to learn the
+vocabulary, writes semantic SQL, and reads a refusal and repairs it without the user seeing any
+of that. What it is *not* yet is non-technical: a **local** server runs on the end user's own
+machine, so they need SemantiQL installed and database access. That is the trade-off recorded
+under Open questions below — MVP-local proves the loop with people who already have access, and
+the genuinely non-technical story needs remote mode.
 
 ## Design principles
 

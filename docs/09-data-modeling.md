@@ -150,11 +150,15 @@ depending on who asked.
 > and in your setup script. A model nobody ran it against can still bucket by a timezone
 > nobody chose.
 
-> **`label` and `description` are written but never read.** Grep confirms it: no engine, CLI,
-> or adapter code touches them. They exist because the MCP server — the thing that will
-> present the model to Claude — is not built yet (README roadmap). Write them anyway: they
-> are the model's documentation for the humans reviewing the diff, and they are the payload
-> the MCP layer will need. Just do not expect them to change an answer today.
+> **`label` and `description` are what Claude reads.** They were written-but-never-read until
+> the MCP server shipped (spec 012); its `describe_model` tool is now their consumer. Claude
+> calls it before writing a query, and these two fields are how it maps the words in a question
+> — "sales channel", "revenue" — onto the names in your model. A dimension with no label is
+> still usable; one with a good label and a description that names the gotcha is what turns a
+> near-miss question into the right answer.
+>
+> They are still not read by the engine, so they cannot change a *number*. They change whether
+> Claude picks the right entity in the first place.
 
 ### 3.5 `measures.<name>` — `Measure` (`model.py:32`)
 
