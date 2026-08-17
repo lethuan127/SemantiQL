@@ -26,13 +26,18 @@ src/semantiql/
 Everything outside `src/` that a change is likely to touch:
 
 ```
-tests/
-  conftest.py           fixtures for every suite, including the Postgres corpora
-  test_*.py             the unit suite — ten rows, hand-computed totals
-  e2e/                  the large-corpus suites; a package, so it has its own conftest
-    conftest.py           generates TPC-H via DuckDB's dbgen, and copies it into Postgres
-    semantic_model.yml    the model under test, plus a `.postgres.yml` sibling
-    test_*.py             engine vs hand-written SQL, and DuckDB vs Postgres
+tests/                  laid out to mirror the layers above, so a change has an obvious test home
+  conftest.py             fixtures for every suite, including the Postgres corpora
+  _support.py             REPO_ROOT and friends — found by walking up to pyproject.toml
+  knowledge/              the model, its loader, and the metric grammar
+  engine/                 validate and compile — mostly refusals, which is the point
+  adapters/              one file per datasource; the pure parts need no database
+  interfaces/             cli, server, and what is shipped to install them
+  integration/            whole-stack answers over the ten-row corpus, and the two-engine checks
+  tooling/                development tooling that is real logic
+  e2e/                    the large-corpus suites, with their own conftest
+    conftest.py             generates TPC-H via DuckDB's dbgen, and copies it into Postgres
+    semantic_model.yml      the model under test, plus a `.postgres.yml` sibling
 examples/retail/        the bundled example — and the unit suite's corpus. Not free to edit.
 examples/warehouse/     a worked directory model: one YAML per table, datasource declared once
   orders.csv              ten rows whose totals are asserted by hand in tests/
@@ -61,6 +66,14 @@ which is which.
 hand from `orders.csv` — change a row and tests fail for a reason that has nothing to do with
 the code. It is also what the README quickstart runs, so it is simultaneously the demo. Adding a
 row means recomputing the expected figures in `tests/test_example_end_to_end.py`.
+
+**The directories mirror the layers; the *markers* are what split by cost.** A file's directory
+says which layer it tests, and its marker says what it needs to run. Those are different questions
+and conflating them is how a fast suite ends up gated behind a database.
+
+Every path constant comes from `tests/_support.py`, which finds the repository by walking up to
+`pyproject.toml`. Counting `..` from a test file is what broke four tests the moment they moved one
+directory deeper, and the failure read as a missing fixture rather than a moved file.
 
 **There are three test suites, not one**, split by what they need rather than by what they cover:
 
@@ -100,7 +113,8 @@ module that looks like a feature.
 | A new model-versus-reality check | `doctor.py` |
 | A new tool Claude can call | `server.py` — and think hard first: those tools are the whole boundary |
 | A new check in the gate | `scripts/verify.sh` — as its own step, so its cost and any skip are visible |
-| A test that needs a database | `tests/` with `pytest.mark.pg`, and it must **skip** when there is none |
+| A test that needs a database | the matching layer directory, marked `pg`, and it must **skip** when there is none |
+| A test for a layer | `tests/<layer>/` — the directory mirrors `src/semantiql/` |
 | A bigger or different corpus | `tests/e2e/conftest.py` — never `examples/retail/`, whose totals are asserted by hand |
 
 ## The two rules the layout exists to enforce

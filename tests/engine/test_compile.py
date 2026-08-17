@@ -317,3 +317,60 @@ def test_a_grain_is_spelled_differently_by_each_dialect(model: SemanticModel) ->
     assert "DATETRUNC(MONTH, CAST(order_date AS DATETIME2))" in rendered["tsql"]
     assert "TIMESTAMPDIFF" in rendered["mysql"]
     assert len(set(rendered.values())) == 4, rendered
+
+
+# --- Metric arithmetic that parses but had never been compiled.
+
+
+def test_a_metric_with_a_number_compiles(tmp_path: Path, model: SemanticModel) -> None:
+    """`revenue / 100` — a literal in a metric had no compile test, only a parse test."""
+    path = tmp_path / "m.yml"
+    path.write_text(
+        "version: 1\n"
+        "datasource: {name: t, dialect: duckdb}\n"
+        "tables:\n"
+        "  orders:\n"
+        "    source: orders\n"
+        "    measures:\n"
+        "      revenue: {column: amount, agg: sum}\n"
+        "    metrics:\n"
+        "      revenue_in_hundreds: {expression: revenue / 100}\n"
+    )
+    scaled = load_model(path)
+    compiled = compile_request(
+        _valid("SELECT revenue_in_hundreds FROM orders", scaled),
+        scaled,
+        relation=ORDERS,
+        dialect="duckdb",
+    )
+    assert "SUM(amount)" in compiled
+    assert "100" in compiled
+    assert "NULLIF" in compiled, "every divisor is guarded, including a literal one"
+
+
+def test_unary_minus_in_a_metric_compiles(tmp_path: Path) -> None:
+    """The parser accepted `-revenue` all along; nothing had ever compiled it.
+
+    A grammar branch that parses and has never produced SQL is a branch nobody has seen the output
+    of — which for a *metric* means a business number.
+    """
+    path = tmp_path / "m.yml"
+    path.write_text(
+        "version: 1\n"
+        "datasource: {name: t, dialect: duckdb}\n"
+        "tables:\n"
+        "  orders:\n"
+        "    source: orders\n"
+        "    measures:\n"
+        "      revenue: {column: amount, agg: sum}\n"
+        "      refunds: {column: amount, agg: sum}\n"
+        "    metrics:\n"
+        "      net: {expression: revenue - refunds}\n"
+        "      inverted: {expression: -revenue}\n"
+    )
+    signed = load_model(path)
+    compiled = compile_request(
+        _valid("SELECT inverted FROM orders", signed), signed, relation=ORDERS, dialect="duckdb"
+    )
+    assert "-" in compiled
+    assert "SUM(amount)" in compiled

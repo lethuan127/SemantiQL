@@ -38,7 +38,10 @@ uv run ruff format . && uv run ruff check --fix .                  # fix style
 uv run mypy                                                        # strict
 ```
 
-Three suites. `tests/*.py` run against the ten-row `examples/retail/` corpus with hand-computed
+Three suites, and `tests/` mirrors `src/semantiql/` — `knowledge/`, `engine/`, `adapters/`, plus
+`interfaces/`, `integration/` and `tooling/`. The directory says which layer a test covers; the
+**marker** says what it needs to run. Take repository paths from `tests/_support.py`, never by
+counting `..`. The unit suite runs against the ten-row `examples/retail/` corpus with hand-computed
 totals. `tests/e2e/` generates a TPC-H corpus and checks the engine against hand-written
 physical SQL — scale it with `SEMANTIQL_E2E_SF`, and expect it to skip offline on a first run
 because the generator extension is fetched once from DuckDB's repository. The `pg` suite runs

@@ -7,12 +7,11 @@ business shipping in the wheel — so it is loaded by path here.
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+from tests._support import REPO_ROOT  # noqa: E402
 
 
 def _load() -> ModuleType:

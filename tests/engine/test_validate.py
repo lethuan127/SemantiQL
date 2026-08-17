@@ -7,12 +7,15 @@ database must never be touched on that path.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from sqlglot import exp
 
 from semantiql.adapters.base import Column
 from semantiql.engine.run import run
 from semantiql.engine.validate import _CLAUSE_LABELS, Refusal, ValidRequest, validate
+from semantiql.knowledge.loader import load_model
 from semantiql.knowledge.model import SemanticModel
 
 
@@ -368,3 +371,158 @@ def test_every_grain_validates(grain: str, model: SemanticModel) -> None:
     assert isinstance(request, ValidRequest), request
     assert request.projections[1].grain == grain
     assert request.projections[1].output == f"order_date_{grain}"
+
+
+# --- Refusal paths that had no test (coverage measured after spec 015).
+#
+# Every line below was an unexercised branch in `validate`. That is the worst place in this project
+# to leave uncovered: a refusal that quietly stops firing does not raise, it *accepts* — and an
+# accepted construct the compiler cannot honour is dropped, so the answer is to a different
+# question. These are the checks that keep that from happening, so they get tests.
+
+_BOOLEAN_MODEL = """
+version: 1
+datasource: {name: t, dialect: duckdb}
+tables:
+  flags:
+    source: flags
+    dimensions:
+      active: {column: active, type: boolean}
+      name: {column: name, type: string}
+    measures:
+      n: {column: name, agg: count}
+"""
+
+
+@pytest.fixture
+def boolean_model(tmp_path: Path) -> SemanticModel:
+    """The retail example has no boolean dimension, and boolean filters have their own rules."""
+    path = tmp_path / "flags.yml"
+    path.write_text(_BOOLEAN_MODEL)
+    return load_model(path)
+
+
+def _refusal(sql: str, model: SemanticModel) -> str:
+    outcome = validate(sql, model)
+    assert isinstance(outcome, Refusal), f"expected a refusal, got {outcome}"
+    return str(outcome)
+
+
+@pytest.mark.parametrize("operator", [">", "<", ">=", "<=", "LIKE"])
+def test_ordering_a_boolean_is_refused(operator: str, boolean_model: SemanticModel) -> None:
+    """`active > FALSE` parses and means nothing.
+
+    Left to the database it would answer — booleans order in SQL — so the number would be real and
+    the question meaningless. Refused with a reason rather than answered.
+    """
+    reason = _refusal(f"SELECT n FROM flags WHERE active {operator} FALSE", boolean_model)
+    assert "boolean" in reason
+
+
+def test_comparing_a_boolean_to_a_non_boolean_is_refused(boolean_model: SemanticModel) -> None:
+    reason = _refusal("SELECT n FROM flags WHERE active = 'yes'", boolean_model)
+    assert "TRUE or FALSE" in reason
+
+
+def test_in_with_no_values_is_refused(model: SemanticModel) -> None:
+    """`IN ()` is a filter that can never match, which is far likelier to be a mistake."""
+    reason = _refusal("SELECT revenue FROM orders WHERE channel IN ()", model)
+    assert "at least one value" in reason
+
+
+def test_is_null_and_is_not_null_are_both_supported(model: SemanticModel) -> None:
+    """Written expecting a refusal; measuring said otherwise, so the test records what is true.
+
+    `IS NOT NULL` is `Negation(Comparison(is null))` — the compiler rebuilds both, so both are
+    accepted. Worth pinning: `IS NOT NULL` on a nullable column is the filter most likely to be
+    quietly dropped, and dropping it widens the population without changing the shape of the answer.
+    """
+    for sql in (
+        "SELECT revenue FROM orders WHERE channel IS NULL",
+        "SELECT revenue FROM orders WHERE channel IS NOT NULL",
+    ):
+        assert not isinstance(validate(sql, model), Refusal), sql
+
+
+def test_is_a_value_other_than_null_is_refused(model: SemanticModel) -> None:
+    """`IS TRUE` is not the `IS NULL` the compiler implements, so it is refused rather than read
+    as one."""
+    reason = _refusal("SELECT revenue FROM orders WHERE channel IS TRUE", model)
+    assert "IS <value>" in reason
+
+
+def test_a_request_with_no_table_is_refused(model: SemanticModel) -> None:
+    reason = _refusal("SELECT revenue", model)
+    assert "no table" in reason
+
+
+def test_a_second_table_is_refused_as_a_join(model: SemanticModel) -> None:
+    """`FROM a, b` is a join written with a comma, and it is caught as one.
+
+    Asserted on the behaviour rather than on the message I assumed: the refusal names JOIN, which
+    is the truthful description of what a comma in FROM is.
+    """
+    reason = _refusal("SELECT revenue FROM orders, orders", model)
+    assert "JOIN" in reason
+
+
+def test_a_subquery_as_the_from_target_is_refused(model: SemanticModel) -> None:
+    """The FROM target resolves to a table in the model, or nothing does."""
+    reason = _refusal("SELECT revenue FROM (SELECT 1)", model)
+    assert "single table in the semantic model" in reason
+
+
+def test_a_set_operation_is_refused(model: SemanticModel) -> None:
+    """UNION would compose two requests the compiler validated separately, and it rebuilds one."""
+    reason = _refusal("SELECT revenue FROM orders UNION SELECT revenue FROM orders", model)
+    assert "Set operations" in reason
+
+
+def test_selecting_nothing_is_refused(model: SemanticModel) -> None:
+    reason = _refusal("SELECT FROM orders", model)
+    assert reason
+
+
+def test_unparseable_text_is_refused_rather_than_raised(model: SemanticModel) -> None:
+    """A caller sending nonsense gets a refusal, not a traceback.
+
+    The MCP server turns a refusal into an answer Claude can repair and an exception into a failed
+    call, so which one this is decides whether a typo ends the conversation.
+    """
+    reason = _refusal("SELECT revenue FROM orders WHERE )(", model)
+    assert reason
+
+
+@pytest.mark.parametrize(
+    "clause",
+    [
+        "ORDER BY UPPER(channel)",
+        "ORDER BY 1",
+        "ORDER BY revenue + 1",
+    ],
+)
+def test_an_expression_in_order_by_is_refused(clause: str, model: SemanticModel) -> None:
+    """Ordering names something the request selected. An expression is not a name."""
+    reason = _refusal(f"SELECT revenue, channel FROM orders {clause}", model)
+    assert reason
+
+
+@pytest.mark.parametrize("limit", ["'ten'", "1.5", "-1", "channel"])
+def test_a_limit_that_is_not_a_whole_number_is_refused(limit: str, model: SemanticModel) -> None:
+    reason = _refusal(f"SELECT revenue FROM orders LIMIT {limit}", model)
+    assert reason
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "INSERT INTO orders VALUES (1)",
+        "UPDATE orders SET amount = 1",
+        "CREATE TABLE x (a int)",
+        "DROP TABLE orders",
+        "WITH x AS (SELECT 1) SELECT revenue FROM orders",
+    ],
+)
+def test_statements_that_are_not_a_select_are_refused(sql: str, model: SemanticModel) -> None:
+    """N5's other half: read-only holds because nothing but a SELECT gets past here."""
+    assert isinstance(validate(sql, model), Refusal)

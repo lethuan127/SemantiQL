@@ -29,8 +29,9 @@ from typing import Any
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
-BUILDER = REPO / "scripts" / "build_bundle.py"
+from tests._support import SCRIPTS  # noqa: E402
+
+BUILDER = SCRIPTS / "build_bundle.py"
 
 
 @pytest.fixture(scope="module")

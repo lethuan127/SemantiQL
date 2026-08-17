@@ -358,3 +358,41 @@ def test_the_tool_count_is_still_two(big_server: Any) -> None:
     schema = _tools(big_server)["describe_model"].input_schema
     assert list(schema.get("properties", {})) == ["table"]
     assert "table" not in schema.get("required", []), "omitting it must stay valid"
+
+
+def test_serve_releases_the_adapter_even_when_the_loop_fails(model: SemanticModel) -> None:
+    """A server that crashes must not leave the connection open.
+
+    For Postgres that connection holds a read-only transaction; leaking it on a crash means a
+    snapshot pinned until the process is reaped. The `finally` in `serve` is what prevents it, and
+    a `finally` nobody tests is a `finally` someone deletes.
+    """
+    from semantiql.server import serve
+
+    closed: list[bool] = []
+
+    class Counting:
+        @property
+        def dialect(self) -> str:
+            return "duckdb"
+
+        def relation(self, source: str) -> Any:  # pragma: no cover - never reached
+            raise AssertionError
+
+        def columns(self, source: str) -> list[Column]:  # pragma: no cover - never reached
+            raise AssertionError
+
+        def execute(self, sql: str) -> Any:  # pragma: no cover - never reached
+            raise AssertionError
+
+        def close(self) -> None:
+            closed.append(True)
+
+    adapter: Adapter = Counting()
+
+    # stdio has no streams under pytest, so the transport raises — which is the point: the failure
+    # is what has to leave the adapter closed.
+    with pytest.raises(BaseException):  # noqa: B017 - anyio wraps whatever stdio raises
+        serve(model, adapter)
+
+    assert closed == [True], "serve must close the adapter on the way out, crash or not"

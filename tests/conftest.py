@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import os
 from collections.abc import Iterator
-from pathlib import Path
 
 import psycopg
 import pytest
@@ -14,11 +13,11 @@ from semantiql.adapters.duckdb import DuckDBAdapter
 from semantiql.adapters.postgres import PostgresAdapter
 from semantiql.knowledge.loader import load_model
 from semantiql.knowledge.model import SemanticModel
+from tests._support import RETAIL
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-EXAMPLE = REPO_ROOT / "examples" / "retail" / "semantic_model.yml"
-EXAMPLE_PG = REPO_ROOT / "examples" / "retail" / "semantic_model.postgres.yml"
-ORDERS_CSV = REPO_ROOT / "examples" / "retail" / "orders.csv"
+EXAMPLE = RETAIL / "semantic_model.yml"
+EXAMPLE_PG = RETAIL / "semantic_model.postgres.yml"
+ORDERS_CSV = RETAIL / "orders.csv"
 
 #: How the Postgres suite is pointed at a database. Nothing in the repo can bundle one, so
 #: absent this the whole `pg` suite skips with a stated reason rather than failing — which is

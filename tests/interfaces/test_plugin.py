@@ -26,8 +26,8 @@ import pytest
 
 from semantiql.engine.validate import Refusal, validate
 from semantiql.knowledge.model import SemanticModel
+from tests._support import PLUGIN  # noqa: E402
 
-PLUGIN = Path(__file__).resolve().parents[1] / "plugin"
 MANIFEST = PLUGIN / ".claude-plugin" / "plugin.json"
 MCP_CONFIG = PLUGIN / ".mcp.json"
 SKILL = PLUGIN / "skills" / "semantiql" / "SKILL.md"

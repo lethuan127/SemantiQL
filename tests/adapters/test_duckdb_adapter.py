@@ -82,3 +82,15 @@ def test_execute_returns_names_and_rows(adapter: DuckDBAdapter) -> None:
     names, rows = adapter.execute("SELECT 1 AS one, 'x' AS letter")
     assert names == ["one", "letter"]
     assert rows == [(1, "x")]
+
+
+def test_an_array_of_timestamps_carries_no_timezone() -> None:
+    """`TIMESTAMPTZ[]` is a list, not an instant — so no grain applies to it.
+
+    The array branch again (spec 009 found it in `_kind`, spec 010 in psycopg's registry). Saying
+    a list of instants carries a zone would let doctor bless a grain over something that has no
+    single point in time at all.
+    """
+    assert DuckDBAdapter._carries_timezone("TIMESTAMPTZ[]") is False
+    assert DuckDBAdapter._carries_timezone("TIMESTAMP WITH TIME ZONE[]") is False
+    assert DuckDBAdapter._carries_timezone("TIMESTAMPTZ") is True

@@ -138,7 +138,7 @@ def test_a_name_is_at_most_one_kind(clash: str, tmp_path: Path) -> None:
 # --- A model spread over a directory (spec 015). Every ambiguity is refused, because a merge that
 # silently picks a definition is the same failure the duplicate-key check exists to prevent.
 
-WAREHOUSE = Path(__file__).resolve().parents[1] / "examples" / "warehouse"
+from tests._support import WAREHOUSE  # noqa: E402
 
 
 def _dir_model(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -250,3 +250,78 @@ def test_the_bundled_warehouse_example_loads() -> None:
     # which is what proves per-file resolution works across a real tree rather than a fixture.
     assert model.tables["orders"].source.endswith("examples/retail/orders.csv")
     assert model.tables["tickets"].source.endswith("examples/warehouse/support/tickets.csv")
+
+
+# --- The guards the loader documents at length and nothing tested.
+
+
+def test_a_duplicate_key_is_refused(tmp_path: Path) -> None:
+    """The check `_StrictLoader` exists for, finally under test.
+
+    PyYAML resolves a repeated key last-wins *before* pydantic sees the data, so `extra="forbid"`
+    cannot catch it. In a file that defines what revenue means, a merge conflict or a careless paste
+    silently redefining a measure is exactly the wrong-number-with-no-symptom this project refuses.
+
+    Its own docstring says so. It had no test.
+    """
+    path = tmp_path / "dup.yml"
+    path.write_text(
+        "version: 1\n"
+        "datasource: {name: t, dialect: duckdb}\n"
+        "tables:\n"
+        "  orders:\n"
+        "    source: orders\n"
+        "    measures:\n"
+        "      revenue: {column: amount, agg: sum}\n"
+        "      revenue: {column: net, agg: avg}\n"  # the same name, twice
+    )
+    with pytest.raises(ModelError) as caught:
+        load_model(path)
+    message = str(caught.value)
+    assert "revenue" in message
+    assert "exactly once" in message
+    assert "line" in message, "the message must locate it — a big model needs the line number"
+
+
+def test_a_duplicate_table_key_is_refused(tmp_path: Path) -> None:
+    """Same guard, one level up: two `orders:` blocks in one file."""
+    path = tmp_path / "dup.yml"
+    path.write_text(
+        "version: 1\n"
+        "datasource: {name: t, dialect: duckdb}\n"
+        "tables:\n"
+        "  orders: {source: a, measures: {n: {column: x, agg: count}}}\n"
+        "  orders: {source: b, measures: {n: {column: y, agg: count}}}\n"
+    )
+    with pytest.raises(ModelError, match="orders"):
+        load_model(path)
+
+
+@pytest.mark.parametrize("content", ["- a\n- b\n", "just a string\n", "42\n"])
+def test_a_file_that_is_not_a_mapping_is_refused(tmp_path: Path, content: str) -> None:
+    """A list where a mapping belongs is a different file, not a model with defaults."""
+    path = tmp_path / "wrong.yml"
+    path.write_text(content)
+    with pytest.raises(ModelError, match="mapping at the top level"):
+        load_model(path)
+
+
+def test_tables_must_be_a_mapping(tmp_path: Path) -> None:
+    """`tables:` as a list is the shape someone writes first, so the error names it."""
+    path = tmp_path / "wrong.yml"
+    path.write_text("version: 1\ndatasource: {name: t, dialect: duckdb}\ntables:\n  - orders\n")
+    with pytest.raises(ModelError, match="`tables` must be a mapping"):
+        load_model(path)
+
+
+def test_unparseable_yaml_names_the_file(tmp_path: Path) -> None:
+    path = tmp_path / "broken.yml"
+    path.write_text("version: 1\n  bad: indentation\n:::\n")
+    with pytest.raises(ModelError) as caught:
+        load_model(path)
+    assert "broken.yml" in str(caught.value)
+
+
+def test_a_missing_path_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ModelError, match="no semantic model at"):
+        load_model(tmp_path / "absent.yml")

@@ -8,6 +8,7 @@ import duckdb
 import pytest
 
 from semantiql.cli import NOT_YET_IMPLEMENTED, main
+from tests._support import REPO_ROOT
 
 
 @pytest.mark.parametrize("verb", sorted(NOT_YET_IMPLEMENTED))
@@ -200,3 +201,160 @@ def test_the_bundled_example_is_the_last_resort(
     monkeypatch.delenv("SEMANTIQL_MODEL", raising=False)
     assert main(["SELECT revenue FROM orders"]) == 0
     assert "1686.24" in capsys.readouterr().out
+
+
+# --- Exit codes and output paths that had no test.
+#
+# The exit codes are a contract: a setup script distinguishes "the question was not answerable"
+# from "your database is unreachable" by the number alone, and `doctor` gating a script depends on
+# it. Untested, that contract is a comment.
+
+
+def test_show_sql_prints_the_sql_that_ran(capsys: pytest.CaptureFixture[str]) -> None:
+    """`--show-sql` is how a reviewer checks the work, so it has to actually print it."""
+    assert main(["SELECT revenue, channel FROM orders", "--show-sql"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("--"), "the SQL is emitted as a comment line, before the table"
+    assert "SUM(amount)" in out
+    assert "GROUP BY" in out
+
+
+def test_the_rendered_table_aligns_its_columns(capsys: pytest.CaptureFixture[str]) -> None:
+    """A misaligned table is unreadable, and nothing else would notice."""
+    assert main(["SELECT revenue, channel FROM orders"]) == 0
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    header, rule, *rows = lines
+    assert set(rule) <= {"-", " "}, "the second line is the rule under the header"
+    assert len(rule) == len(header.rstrip()) or len(rule) >= len(header) - 2
+    for row in rows:
+        assert len(row.rstrip()) <= len(rule) + 2, f"row wider than the rule: {row!r}"
+
+
+def test_an_unreachable_datasource_exits_three_from_a_query(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Exit 3 means the datasource; 1 would mean the question. A script must be able to tell."""
+    code = main(
+        [
+            "SELECT revenue FROM orders",
+            "-m",
+            "examples/retail/semantic_model.postgres.yml",
+            "--datasource",
+            "postgres",
+            "--dsn",
+            "postgresql://postgres@127.0.0.1:59999/nope",
+        ]
+    )
+    assert code == 3
+    assert "could not connect" in capsys.readouterr().err
+
+
+def test_an_unreachable_datasource_exits_three_from_doctor(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = main(
+        [
+            "doctor",
+            "-m",
+            "examples/retail/semantic_model.postgres.yml",
+            "--datasource",
+            "postgres",
+            "--dsn",
+            "postgresql://postgres@127.0.0.1:59999/nope",
+        ]
+    )
+    assert code == 3
+
+
+def test_serve_exits_two_on_a_model_that_will_not_load(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Startup is where this belongs (spec 012, FR-8).
+
+    A server that starts and refuses every question looks healthy to the client and broken to the
+    user. Failing before the loop means a server that started can answer.
+    """
+    code = main(["serve", "-m", "/nonexistent/model.yml"])
+    assert code == 2
+    assert "error:" in capsys.readouterr().err
+
+
+def test_serve_exits_three_on_an_unreachable_datasource(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = main(
+        [
+            "serve",
+            "-m",
+            "examples/retail/semantic_model.postgres.yml",
+            "--datasource",
+            "postgres",
+            "--dsn",
+            "postgresql://postgres@127.0.0.1:59999/nope",
+        ]
+    )
+    assert code == 3
+
+
+def test_print_config_carries_a_postgres_dsn(capsys: pytest.CaptureFixture[str]) -> None:
+    """The Postgres branch of the connector block, which the DuckDB test does not reach."""
+    import json
+
+    code = main(
+        [
+            "serve",
+            "-m",
+            "examples/retail/semantic_model.postgres.yml",
+            "--datasource",
+            "postgres",
+            "--dsn",
+            "postgresql://ro@db/wh",
+            "--print-config",
+        ]
+    )
+    assert code == 0
+    block = json.loads(capsys.readouterr().out)
+    args = block["mcpServers"]["semantiql"]["args"]
+    assert "--dsn" in args and "postgresql://ro@db/wh" in args
+    assert "--datasource" in args and "postgres" in args
+
+
+def test_print_config_resolves_a_duckdb_database_path(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Every path in the block is absolute, because a relative one is why a server never appears."""
+    import json
+
+    database = tmp_path / "w.duckdb"
+    database.write_text("")
+    assert main(["serve", "--database", str(database), "--print-config"]) == 0
+    args = json.loads(capsys.readouterr().out)["mcpServers"]["semantiql"]["args"]
+    assert str(database.resolve()) in args
+    assert not any(a.startswith("./") or a == ".." for a in args)
+
+
+def test_a_bad_datasource_in_the_environment_is_an_argument_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A variable is as capable of a typo as a flag, and argparse never sees it."""
+    monkeypatch.setenv("SEMANTIQL_DATASOURCE", "postgrez")
+    with pytest.raises(SystemExit):
+        main(["SELECT revenue FROM orders"])
+
+
+def test_the_package_runs_as_a_module() -> None:
+    """`python -m semantiql` is what the Desktop bundle's connector block names.
+
+    If `__main__.py` breaks, the bundle stops starting and nothing else in the suite notices.
+    """
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-m", "semantiql", "SELECT revenue FROM orders"],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "1686.24" in result.stdout

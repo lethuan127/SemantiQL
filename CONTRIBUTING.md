@@ -95,6 +95,11 @@ uv run mypy                                      # types (strict)
 **Unit tests** run against `examples/retail/` — ten rows whose expected totals were computed
 by hand. They are exact, they need nothing installed, and they are what you run on every save.
 
+`tests/` mirrors `src/semantiql/`: `knowledge/`, `engine/`, `adapters/`, plus `interfaces/` for the
+CLI and MCP server, `integration/` for whole-stack answers, and `tooling/`. A change to
+`engine/validate.py` has one obvious place for its test. Paths come from `tests/_support.py` rather
+than counting `..`, so moving a file never breaks one.
+
 **End-to-end tests** (`tests/e2e/`, marked `e2e`) generate a TPC-H corpus into a temporary
 DuckDB file and check the engine against **hand-written physical SQL** rather than against
 pinned numbers — so a mistranslation fails the first time it runs. Sixty thousand rows and
