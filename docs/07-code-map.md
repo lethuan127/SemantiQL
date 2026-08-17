@@ -21,6 +21,46 @@ src/semantiql/
   cli.py         the `semantiql` command
 ```
 
+Everything outside `src/` that a change is likely to touch:
+
+```
+tests/
+  conftest.py           fixtures for every suite, including the Postgres corpora
+  test_*.py             the unit suite — ten rows, hand-computed totals
+  e2e/                  the large-corpus suites; a package, so it has its own conftest
+    conftest.py           generates TPC-H via DuckDB's dbgen, and copies it into Postgres
+    semantic_model.yml    the model under test, plus a `.postgres.yml` sibling
+    test_*.py             engine vs hand-written SQL, and DuckDB vs Postgres
+examples/retail/        the bundled example — and the unit suite's corpus. Not free to edit.
+  orders.csv              ten rows whose totals are asserted by hand in tests/
+  semantic_model.yml      the model the README quickstart runs, plus a `.postgres.yml` sibling
+compose.yaml            a throwaway Postgres for the `pg` suite; CI starts it from this file too
+scripts/
+  verify.sh               the gate. One command CI and a contributor both run.
+  lint_commit_msg.py      commit-message rules, tested by tests/test_commit_msg_lint.py
+  install-hooks.sh        points git at .githooks/
+.githooks/              pre-commit runs the gate; commit-msg runs the linter above
+```
+
+Two of those are easier to break than they look.
+
+**`examples/retail/` is test data, not sample data.** The unit suite asserts totals computed by
+hand from `orders.csv` — change a row and tests fail for a reason that has nothing to do with
+the code. It is also what the README quickstart runs, so it is simultaneously the demo. Adding a
+row means recomputing the expected figures in `tests/test_example_end_to_end.py`.
+
+**There are three test suites, not one**, split by what they need rather than by what they cover:
+
+| Suite | Marker | Needs | Absent that |
+|---|---|---|---|
+| unit | — | nothing | always runs |
+| large-corpus | `e2e` | DuckDB's `tpch` extension, fetched once from DuckDB | skips with a reason |
+| two-engine | `pg` | a Postgres, via `SEMANTIQL_TEST_DSN` | skips with a reason |
+
+Both skips are deliberate and load-bearing: a fresh clone has to pass the gate with nothing
+installed and no network. Never make either a hard failure, and never make the gate require
+Docker — `compose.yaml` exists to make the `pg` suite *easy*, not mandatory.
+
 `doctor.py` sits beside the layers rather than inside one: it reads a model and a datasource's
 schema, and it is deliberately **not** in `engine/`, because the engine has exactly one path to
 data and a checker living next to it would blur that. It reads metadata, never rows.
@@ -40,6 +80,9 @@ module that looks like a feature.
 | Support a new database | one new file in `adapters/` — **and nothing else** |
 | A new CLI verb | `cli.py`, routing through `engine.run.run` |
 | A new model-versus-reality check | `doctor.py` |
+| A new check in the gate | `scripts/verify.sh` — as its own step, so its cost and any skip are visible |
+| A test that needs a database | `tests/` with `pytest.mark.pg`, and it must **skip** when there is none |
+| A bigger or different corpus | `tests/e2e/conftest.py` — never `examples/retail/`, whose totals are asserted by hand |
 
 ## The two rules the layout exists to enforce
 
