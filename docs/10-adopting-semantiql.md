@@ -11,11 +11,12 @@ read [03-setup-workflow.md](03-setup-workflow.md). This document is the part tha
 
 ## Read this before you start
 
-**You will hand-write the semantic model.** `semantiql init` — the wizard that introspects your
-schema and drafts the YAML for you — is **not built**. What exists is `semantiql doctor`, which
-checks a model you wrote against the real database and tells you precisely what is wrong. That
-turns model-writing from guesswork into a short correct-the-errors loop, but it is still you
-writing the first draft.
+**Claude writes the semantic model; you review it.** There is no `semantiql init` wizard, and
+there is something better: `semantiql inspect` reads your catalogue with no model required, and the
+skill has Claude drive it — read the schema, ask you what the schema cannot say, write the YAML,
+then loop on `semantiql doctor` until the model and the database agree. Your job is answering the
+judgement questions and reading the diff. Writing it by hand still works, and [Step 3](#step-3--get-a-first-draft-of-the-model)
+covers both.
 
 **There is a Claude interface, and there is a limit to it.** `semantiql serve` runs an MCP
 server, so you can ask questions in English through Claude Desktop rather than writing semantic
@@ -69,7 +70,16 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO semantiql_ro;
 Keep the password out of your shell history: omit `--dsn` entirely and let libpq read `PGHOST`,
 `PGUSER`, `PGPASSWORD` and `~/.pgpass`, exactly as `psql` does.
 
-## Step 3 — Write a first draft of the model
+## Step 3 — Get a first draft of the model
+
+**The fast path is to let Claude write it.** Open Claude Code in the checkout, with the plugin
+installed, and ask for a model for your database. It runs `semantiql inspect` to read your real
+catalogue, asks you the few questions a schema cannot answer — which aggregation counts as revenue,
+what a row is, which columns are sensitive — writes one YAML per table, and loops on `doctor` until
+it passes. [03-setup-workflow.md §A3](03-setup-workflow.md) is that loop in detail.
+
+The rest of this step is the same work done by hand. Read it anyway: reviewing what Claude wrote is
+the one part of this you cannot delegate, and this is what you are reviewing.
 
 Pick **one** table or view and describe it. Model the one thing you are asked about most and grow
 from there — not because the engine cannot handle more, but because a model you have not verified
@@ -128,7 +138,8 @@ The full field reference — every key, what it compiles to, and what is refused
 
 ## Step 4 — Run `doctor` and fix what it finds
 
-This is the loop that replaces the missing wizard. Run it before you run a single query:
+Run it before you run a single query — and again whenever the database changes. Claude runs this
+same command during discovery; running it yourself is how you confirm what it concluded:
 
 ```bash
 uv run semantiql doctor -m model.yml \
@@ -361,5 +372,5 @@ engine is loud rather than silently answered by the other one.
 - [09-data-modeling.md](09-data-modeling.md) — the complete model reference.
 - [02-architecture.md](02-architecture.md) — why validation is the centrepiece.
 - [05-datasources.md](05-datasources.md) — which databases are supported, and the roadmap.
-- [03-setup-workflow.md](03-setup-workflow.md) — the setup flow as designed, including the wizard
-  and the Claude integration that are still to come.
+- [03-setup-workflow.md](03-setup-workflow.md) — the same ground with both roles separated, and
+  §A3 on the discovery loop in more detail than here.

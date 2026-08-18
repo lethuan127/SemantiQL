@@ -142,3 +142,55 @@ def test_a_file_source_is_refused_by_name(source: str) -> None:
         PostgresAdapter.relation(source)
     assert "file source" in str(caught.value)
     assert "load the file into a table" in str(caught.value)
+
+
+def _dsn_for_observer() -> str:
+    """The DSN from the environment, not from the live connection.
+
+    psycopg redacts the password from `conn.info.dsn`, so reconnecting with it works only against a
+    password-free server. That exact mistake broke CI for five commits.
+    """
+    import os
+
+    dsn = os.environ.get("SEMANTIQL_TEST_DSN")
+    assert dsn, "the pg marker guarantees this is set"
+    return dsn
+
+
+@pytest.mark.pg
+def test_enumeration_excludes_the_system_schemas(postgres_adapter: PostgresAdapter) -> None:
+    """Without the exclusion, a few hundred catalogue relations bury the user's tables."""
+    listed = postgres_adapter.tables()
+    assert listed, "the corpus fixture creates tables, so something must be listed"
+    assert not [name for name in listed if name.startswith(("pg_catalog.", "information_schema."))]
+    assert "orders" in listed, "public relations are returned unqualified"
+
+
+@pytest.mark.pg
+def test_every_enumerated_name_can_be_described(postgres_adapter: PostgresAdapter) -> None:
+    """A listed name must be a name `columns()` accepts, or discovery writes a broken model."""
+    for name in postgres_adapter.tables():
+        assert postgres_adapter.columns(name) is not None
+
+
+@pytest.mark.pg
+def test_enumeration_leaves_no_open_transaction(postgres_adapter: PostgresAdapter) -> None:
+    """Same hazard as `execute` (spec 012): a long-lived server must not pin a snapshot.
+
+    Enumeration runs its own query, so it needs its own end-of-transaction — and nothing else
+    would notice, because the returned list is correct either way.
+    """
+    import psycopg
+
+    pid = postgres_adapter._conn.info.backend_pid
+    postgres_adapter.tables()
+
+    observer = psycopg.connect(_dsn_for_observer())
+    observer.autocommit = True
+    try:
+        row = observer.execute(
+            "SELECT state FROM pg_stat_activity WHERE pid = %s", (pid,)
+        ).fetchone()
+    finally:
+        observer.close()
+    assert row is not None and row[0] == "idle", f"backend is {row and row[0]!r} after tables()"

@@ -78,6 +78,27 @@ class Adapter(Protocol):
         """
         ...
 
+    def tables(self) -> list[str]:
+        """Every relation this datasource offers, as names `columns()` will accept.
+
+        Tables *and* views. A view is the documented way to model a join, so omitting them would
+        hide the exact relations a modeller is most likely to want.
+
+        Names are qualified by schema only where they need to be — bare in the default schema,
+        `schema.name` outside it — so a discovered name can be pasted into a model's `source:`
+        unchanged and still be unambiguous.
+
+        Returns names rather than a richer record on purpose. A name is what `columns()` needs, and
+        a Protocol that an outside adapter has to satisfy should ask for the least that does the
+        job; `semantiql inspect` can present more without the seam growing.
+
+        **This is the third time this Protocol has grown** — `close()` (spec 010),
+        `carries_timezone` (011), now `tables()` (016). Each was found by building a real consumer
+        against it, which is the seam doing its job. But three is a pattern: a fourth should prompt
+        asking whether this is still the right shape, rather than adding a fifth.
+        """
+        ...
+
     def columns(self, source: str) -> list[Column]:
         """Describe the columns of a model `source` — the basis for checking model vs reality.
 

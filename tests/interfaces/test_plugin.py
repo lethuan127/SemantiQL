@@ -206,3 +206,67 @@ def test_the_skill_tells_claude_to_stop_at_a_missing_definition(model: SemanticM
     assert "reviewed change to" in text, (
         "the skill must say where a definition legitimately changes"
     )
+
+
+# --- The discovery workflow (spec 016), and the limits N6 puts on it.
+
+
+def test_the_skill_tells_claude_to_write_the_model_itself() -> None:
+    """The correction that prompted spec 016.
+
+    An earlier document described hand-writing the YAML as the flow. Claude has a shell and file
+    tools, so the flow is that Claude inspects and writes — and the skill has to say so, or Claude
+    will politely ask the user to do it instead.
+    """
+    text = SKILL.read_text()
+    assert "semantiql inspect" in text
+    assert "**you** write the YAML" in text
+    assert "Do not ask the user to hand-write it" in text
+
+
+def test_the_skill_puts_the_judgement_calls_to_the_human() -> None:
+    """The split that makes discovery safe: mechanical work automated, judgement asked about.
+
+    Which aggregation counts as revenue, what a row is, which columns are sensitive, and which
+    timezone months belong to are not derivable from a schema at any level of cleverness.
+    """
+    text = SKILL.read_text()
+    for question in (
+        "Which aggregation is the sanctioned one?",
+        "What is a row?",
+        "Which columns are sensitive?",
+        "which timezone do months belong to?",
+    ):
+        assert question in text, f"the skill must ask: {question}"
+    assert "Do not guess at PII" in text
+
+
+def test_the_skill_forbids_changing_a_model_to_answer_a_question() -> None:
+    """N6, at the one place the new capability could break it.
+
+    Discovery is a task the user asked for with them present — a reviewed change. Editing a model
+    mid-question to make it answerable is automatic change to what a number means, which the
+    constitution forbids outright. The skill now does both things, so the line has to be explicit.
+    """
+    text = SKILL.read_text()
+    assert "Never change a model to answer a question" in text
+    assert "Never invent a measure's aggregation" in text
+
+
+def test_the_skill_tells_claude_to_run_doctor_until_it_passes() -> None:
+    """Writing the files is half of it; the loop is what makes the result trustworthy."""
+    text = SKILL.read_text()
+    assert "semantiql doctor" in text
+    assert "until it exits 0" in text
+
+
+def test_the_skill_does_not_promise_a_tool_the_server_lacks() -> None:
+    """Discovery uses a shell, not a third MCP tool. The surface stays two (FR-10).
+
+    A skill telling Claude to call an `inspect` *tool* would fail silently in Claude Desktop, where
+    there is no shell — so the skill must name the command, not a tool.
+    """
+    text = SKILL.read_text()
+    assert "inspect" in text
+    for invented in ("inspect_schema", "describe_datasource", "list_tables"):
+        assert invented not in text, f"the skill names a tool that does not exist: {invented}"

@@ -153,6 +153,40 @@ class PostgresAdapter:
             return f"oid {oid}"
         return f"{info.regtype}[]" if info.oid != oid else info.regtype
 
+    #: `public` needs no qualification; anything else is returned as `schema.name`.
+    _DEFAULT_SCHEMA = "public"
+
+    #: Postgres's own catalogue schemas. Listing them would bury the user's tables under a few
+    #: hundred system relations.
+    _SYSTEM_SCHEMAS = ("pg_catalog", "information_schema")
+
+    def tables(self) -> list[str]:
+        """Tables and views the connected role can see, sorted.
+
+        Visibility comes for free and is a feature rather than an accident: `information_schema`
+        shows what the role is permitted to see, so a read-only account with limited grants
+        produces a correspondingly limited list. Discovery cannot reveal more than the credentials
+        already allow.
+        """
+        query = (
+            "SELECT table_schema, table_name FROM information_schema.tables "
+            "WHERE table_schema <> ALL(%s) ORDER BY table_schema, table_name"
+        )
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(query, (list(self._SYSTEM_SCHEMAS),))
+                rows = cur.fetchall()
+            self._conn.rollback()  # end the read-only transaction, as `execute` does
+        except psycopg.Error as exc:
+            self._conn.rollback()
+            raise AdapterError(f"could not list relations: {exc}") from exc
+        # Sorted by the name as returned, not by schema — the catalogue's order puts `main.t`
+        # before `staging.raw`, which reads as unsorted to anyone looking at the output.
+        return sorted(
+            str(name) if schema == self._DEFAULT_SCHEMA else f"{schema}.{name}"
+            for schema, name in rows
+        )
+
     def columns(self, source: str) -> list[Column]:
         """Describe `source` without reading a row of it.
 

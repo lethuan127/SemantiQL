@@ -42,9 +42,34 @@ shell, from which the database is reachable by any route. The tool surface *is* 
 boundary — which is why widening it is a decision rather than a convenience.
 
 **Where the boundary between 1 and 2 is absolute.** The skill may teach Claude anything about *how
-to ask*. It may never let Claude change what a number *means*. A missing metric is reported and the
-conversation stops; adding it is a reviewed change to a file in git (N6). Blur that line and
-"revenue means one thing here" stops being true.
+to ask*. It may never let Claude change what a number *means* while answering a question. A missing
+metric is reported and the conversation stops; adding it is a reviewed change to a file in git (N6).
+Blur that line and "revenue means one thing here" stops being true.
+
+### Two modes, and why they get different tool surfaces
+
+Claude does two different jobs here, and conflating them is how the boundary above would quietly
+break.
+
+| | **Building** the model | **Asking** a question |
+|---|---|---|
+| Who is there | the analyst, in the conversation | anyone, often alone |
+| Where | Claude Code, in a checkout | Claude Desktop, over the MCP server |
+| Tools | a shell and file writes — `semantiql inspect`, `doctor`, editing YAML | `describe_model` and `query`, and nothing else |
+| May component 2 change | yes, that is the task | **no** |
+| What stops a wrong definition | the analyst reads the diff, and `doctor` proves it matches the database | it cannot arise: there is no path to the file |
+
+**Building deliberately has the shell that asking deliberately lacks.** Spec 016 gave the skill a
+discovery loop: read the catalogue with `inspect`, ask the analyst the handful of things a schema
+cannot answer, write one YAML per table, loop on `doctor`. That is a change to a definition — and it
+is fine, because the human who owns the definition asked for it and is reading the result. The same
+capability reached from a question would be the exact failure N6 forbids, which is why the *asking*
+surface is two read-only tools with no file access and no shell, structurally rather than by
+instruction.
+
+So the rule is not "Claude never writes the model". It is **Claude never writes the model as a side
+effect of answering**. The skill says so in those words, and a test asserts the sentence is still
+there.
 
 ## The four layers, inside execution
 

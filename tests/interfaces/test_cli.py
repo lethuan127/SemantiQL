@@ -358,3 +358,120 @@ def test_the_package_runs_as_a_module() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "1686.24" in result.stdout
+
+
+# --- `inspect` (spec 016): the verb that runs before a model exists.
+
+
+@pytest.fixture
+def warehouse_db(tmp_path: Path) -> Path:
+    import duckdb
+
+    database = tmp_path / "w.duckdb"
+    setup = duckdb.connect(str(database))
+    setup.execute(
+        "CREATE TABLE orders (id BIGINT, placed_at TIMESTAMPTZ, channel VARCHAR,"
+        "                     amount DECIMAL(10,2));"
+        "CREATE VIEW order_v AS SELECT * FROM orders;"
+        "CREATE SCHEMA staging; CREATE TABLE staging.raw (blob VARCHAR)"
+    )
+    setup.close()
+    return database
+
+
+def test_inspect_needs_no_model(capsys: pytest.CaptureFixture[str], warehouse_db: Path) -> None:
+    """The point of the verb, asserted.
+
+    Everything else in this CLI takes a model and checks a claim about it. This takes a database and
+    makes none — which is what lets it run before a model exists, which is when it is needed.
+    `-m` is never passed here, and the bundled default must not be loaded either.
+    """
+    assert main(["inspect", "--database", str(warehouse_db)]) == 0
+    out = capsys.readouterr().out
+    assert "orders" in out
+    assert "3 relations" in out
+
+
+def test_inspect_lists_relations_then_columns_on_request(
+    capsys: pytest.CaptureFixture[str], warehouse_db: Path
+) -> None:
+    """Two steps (FR-7). A five-hundred-table warehouse must not arrive in one reply."""
+    assert main(["inspect", "--database", str(warehouse_db)]) == 0
+    listing = capsys.readouterr().out
+    assert "placed_at" not in listing, "the listing must not include columns"
+
+    assert main(["inspect", "--database", str(warehouse_db), "--table", "orders"]) == 0
+    detail = capsys.readouterr().out
+    assert "placed_at" in detail
+
+
+def test_inspect_json_gives_claude_what_it_needs_to_write_a_model(
+    capsys: pytest.CaptureFixture[str], warehouse_db: Path
+) -> None:
+    """Each column carries the model's own type *and* the timezone flag.
+
+    The native type tells a DBA what the database holds; `semantiql_type` is what goes in the YAML,
+    and `carries_timezone` is what decides whether `timezone:` is needed. Writing a model from the
+    native type alone would mean re-deriving a mapping the adapter already did.
+    """
+    import json
+
+    assert main(["inspect", "--database", str(warehouse_db), "--table", "orders", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["source"] == "orders"
+    by_name = {c["name"]: c for c in payload["columns"]}
+    assert by_name["placed_at"]["semantiql_type"] == "date"
+    assert by_name["placed_at"]["carries_timezone"] is True
+    assert by_name["amount"]["semantiql_type"] == "number"
+    assert by_name["channel"]["carries_timezone"] is False
+
+
+def test_inspect_json_lists_relations_and_the_dialect(
+    capsys: pytest.CaptureFixture[str], warehouse_db: Path
+) -> None:
+    import json
+
+    assert main(["inspect", "--database", str(warehouse_db), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dialect"] == "duckdb"
+    assert "staging.raw" in payload["relations"], "a non-default schema stays qualified"
+
+
+def test_inspect_explains_an_empty_catalogue_rather_than_printing_nothing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """In-memory DuckDB over files has no catalogue objects — correct, and it looks like a bug.
+
+    Printing nothing would leave the reader concluding the command is broken. This is the one place
+    a wall of explanation beats silence.
+    """
+    assert main(["inspect"]) == 0
+    out = capsys.readouterr().out
+    assert "No relations found" in out
+    assert "not a catalogue object" in out
+
+
+def test_inspect_on_an_unreachable_datasource_exits_three(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert (
+        main(
+            [
+                "inspect",
+                "--datasource",
+                "postgres",
+                "--dsn",
+                "postgresql://postgres@127.0.0.1:59999/nope",
+            ]
+        )
+        == 3
+    )
+
+
+def test_inspect_on_a_relation_that_does_not_exist_exits_three(
+    capsys: pytest.CaptureFixture[str], warehouse_db: Path
+) -> None:
+    """A typo'd relation name is a datasource error, not a silent empty result."""
+    code = main(["inspect", "--database", str(warehouse_db), "--table", "nope"])
+    assert code == 3
+    assert "could not read" in capsys.readouterr().err

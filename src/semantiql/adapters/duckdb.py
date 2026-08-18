@@ -120,6 +120,32 @@ class DuckDBAdapter:
             return "date"
         return cls._KINDS.get(base, "other")
 
+    #: Relations DuckDB puts in its own default schema, which need no qualification. Anything
+    #: else is returned as `schema.name` so it stays unambiguous when pasted into a model.
+    _DEFAULT_SCHEMA = "main"
+
+    def tables(self) -> list[str]:
+        """Tables and views from the catalogue, sorted.
+
+        A `read_csv_auto` source is **not** a catalogue object, so an in-memory connection reading
+        CSV files reports nothing here. That is correct and it looks like a bug, which is why the
+        CLI says so rather than printing an empty list.
+        """
+        query = (
+            "SELECT table_schema, table_name FROM information_schema.tables "
+            "ORDER BY table_schema, table_name"
+        )
+        try:
+            rows = self._conn.execute(query).fetchall()
+        except duckdb.Error as exc:  # pragma: no cover - catalogue is always readable
+            raise AdapterError(f"could not list relations: {exc}") from exc
+        # Sorted by the name as returned, not by schema — the catalogue's order puts `main.t`
+        # before `staging.raw`, which reads as unsorted to anyone looking at the output.
+        return sorted(
+            str(name) if schema == self._DEFAULT_SCHEMA else f"{schema}.{name}"
+            for schema, name in rows
+        )
+
     def columns(self, source: str) -> list[Column]:
         """Describe `source` without reading a row of it.
 

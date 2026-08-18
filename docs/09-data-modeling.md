@@ -7,6 +7,11 @@ definition like *revenue* exists — never in Python, never in a prompt, never i
 This document is the reference for writing one: every field, every allowed value, what each
 one compiles to, what is rejected and when, and what the model deliberately cannot say yet.
 
+**You are most likely reviewing one rather than typing one.** Claude writes the first draft from
+your real schema — `semantiql inspect`, then the questions a schema cannot answer, then the YAML;
+[03-setup-workflow.md §A3](03-setup-workflow.md) is that loop. This file is what makes the review
+informed: it is the reference for every field you are about to approve.
+
 It describes **what is implemented today**, verified against the code and by running it.
 [02-architecture.md](02-architecture.md) describes the intended shape of layer 1, which is
 larger than what is built — where the two differ, this file is the narrower, truer one.

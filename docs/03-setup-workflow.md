@@ -32,6 +32,11 @@ uv run semantiql "SELECT revenue, channel FROM orders"
 > `semantiql doctor` and the Postgres adapter, so `uvx semantiql doctor` answers *"doctor is not
 > implemented yet"*. Install from source until a newer release is cut.
 
+**Also install [Claude Code](https://claude.com/claude-code) if you don't have it**, and add this
+checkout's `plugin/` directory. [A3](#a3-let-claude-write-the-model-from-your-real-schema) has Claude
+read your schema and write the model, which needs a Claude that can run commands and edit files —
+Claude Desktop cannot do either. Desktop is for Flow B, where questions get asked.
+
 ### A2. Create a read-only database account
 
 Nothing in the query path needs write access, and the engine refuses every non-`SELECT`. A
@@ -48,15 +53,71 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO semantiql_ro;
 Keep the password out of your shell history and out of any file you paste around: omit `--dsn`
 and let libpq read `PGHOST`, `PGUSER`, `PGPASSWORD` and `~/.pgpass`, exactly as `psql` does.
 
-### A3. Write the first draft of the model
+### A3. Let Claude write the model from your real schema
 
-> **This is the step that is not automated.** `semantiql init` — a wizard that introspects the
-> schema and drafts the YAML — is **not built**. What replaces it is A4's correct-the-errors loop,
-> which turns model-writing from guesswork into a short conversation with `doctor`. You still
-> write the first draft.
+This is the step people expect to be a wizard. It is not a wizard, it is a conversation — and the
+reason is worth one paragraph, because it decides how you spend the next ten minutes.
 
-Pick **one** table or view. Modelling a whole warehouse before verifying any of it is how a
-fifteen-minute setup becomes an afternoon.
+A schema tells you `amount NUMERIC(10,2)` exists. It cannot tell you whether revenue is the sum of
+it, the sum of it net of refunds, or the sum of a different column entirely. **Everything mechanical
+here is automated; everything that is a judgement call gets asked.** So the tool that reads your
+database is a command, and the thing that decides what the numbers mean is Claude talking to you.
+
+**Open Claude Code in the checkout** and say:
+
+```
+Build me a semantic model for this database. It's Postgres, DSN is in PGHOST/PGUSER,
+and I care about the orders and customers tables to start with.
+```
+
+The `semantiql` skill takes over from there. What it does, so you can follow along and interrupt:
+
+**1 — It reads your catalogue.** `semantiql inspect` lists every table and view; `--table orders`
+lists that relation's columns with the type SemantiQL would give each one:
+
+```console
+$ uv run semantiql inspect --datasource postgres --table orders
+orders:
+  order_id   bigint                    -> type: number
+  placed_at  timestamp with time zone  -> type: date  carries a timezone
+  channel    text                      -> type: string
+  amount     numeric                   -> type: number
+```
+
+`placed_at` is the line that matters most: `type: date` cannot tell a `date`, a naive `timestamp`
+and a `timestamptz` apart, and only the third one takes a `timezone:` — so this is where that
+decision gets made, with the real column in front of you.
+
+That needs **no model** — it is the one verb that runs before one exists. Run it yourself if you
+want to see what Claude sees; add `--json` for the machine-readable shape it actually reads.
+
+**2 — It shortlists.** One table, or a handful, not the whole warehouse. Modelling forty tables
+before verifying one is how a fifteen-minute setup becomes an afternoon.
+
+**3 — It asks you the questions a schema cannot answer.** Expect roughly these, and expect to
+actually answer them — this is the part that makes the model yours:
+
+| It asks | Because |
+|---|---|
+| Which aggregation is the sanctioned one for `amount`? | `sum` and `avg` are both defensible; only one is what your company calls revenue |
+| What is a row in `orders`? | "One row per order line, not per order" is the difference between a right and a wrong total |
+| Which columns are sensitive? | It will not guess at PII, so anything you don't name stays in the model |
+| `placed_at` carries a timezone — which timezone do months belong to? | See [A5](#a5-if-a-date-column-carries-a-timezone-declare-it); there is no safe default |
+
+**4 — It writes the YAML.** Claude has file tools, so it writes the files. One YAML per table under
+a directory, `datasource` declared once. You are reviewing a diff, not typing from a template.
+
+**5 — It runs `doctor` and fixes what fails**, looping until the command exits 0 — [A4](#a4-run-doctor-until-it-exits-0)
+is that loop, and it is Claude's loop as much as yours.
+
+**6 — It shows you the result and asks you to read it.** Do read it. This file decides what every
+future number means, and it is the one artifact in the system that no amount of validation can
+check for you: `doctor` proves the model matches the *database*, never that it matches your
+*business*.
+
+#### What it produces
+
+For orientation, not for copying — this is roughly what lands on disk:
 
 ```yaml
 version: 1
@@ -82,20 +143,36 @@ tables:
       revenue_per_order: {expression: revenue / order_count}
 ```
 
-**Write the `label` and `description` fields.** They are not decoration: `describe_model` sends
-them to Claude, and they are how it maps "sales channel" in a question onto `channel` in your
-model. A description that names the trap — *"one row per order line, not per order"* — prevents a
-whole class of wrong answer.
+The `label` and `description` fields are load-bearing, not decoration: `describe_model` sends them
+to Claude, and they are how "sales channel" in a question finds `channel` in your model. A
+description that names the trap — *"one row per order line, not per order"* — prevents a whole class
+of wrong answer. Complete field reference: [09-data-modeling.md](09-data-modeling.md).
 
-The complete field reference is [09-data-modeling.md](09-data-modeling.md).
+**One file or a directory, `-m` takes either.** One table, one file, once one file stops being
+reviewable. Worked example in `examples/warehouse/`; the merge rules are in
+[09-data-modeling.md](09-data-modeling.md).
 
-**When one file stops being reviewable, use a directory** — one YAML per table, `datasource`
-declared once, subdirectories allowed. `-m` takes either. See
-[09-data-modeling.md §2b](09-data-modeling.md) and the worked example in `examples/warehouse/`.
+#### Two limits, stated plainly
+
+**Claude will not invent a measure's aggregation or a metric's formula.** If you don't answer, it
+asks again rather than picking. That is deliberate: a plausible wrong definition is the failure this
+whole project exists to prevent, and it is invisible once it is in the YAML.
+
+**Claude will not edit the model to make a question answerable.** Later, in day-to-day use, "revenue
+by region" against a model with no region dimension gets you a refusal and an offer to add it as its
+own reviewed change — never a dimension quietly appearing mid-answer. Building a model is a task you
+asked for with you present; changing what a number means is not something that happens while you're
+reading a chart.
+
+#### If you'd rather write it by hand
+
+Nothing stops you. Write the YAML above, run `semantiql inspect --table <name>` when you need to
+check a column's real type, and go to A4. The loop there is identical.
 
 ### A4. Run `doctor` until it exits 0
 
-This is the loop that stands in for the missing wizard. Run it before you run a single query.
+**A3 already ran this** — it is step 5 of the discovery loop, and Claude iterates on it until it
+passes. Run it yourself before you trust the model, whenever the database changes, and in CI.
 
 ```bash
 uv run semantiql doctor -m model.yml \
@@ -316,6 +393,9 @@ mode, below.
   non-`SELECT`.
 - The semantic model is **YAML in git** — one file, or a directory of them once one file stops
   being reviewable. Diffable, reviewable, and the only source of truth.
+- **Mechanical work is automated; judgement is asked about.** Claude reads the schema and writes the
+  file; which aggregation counts as revenue, and what a row is, come from the analyst. Neither half
+  is a step the other can absorb.
 - **Refusing beats guessing.** An unanswerable question returns a reason, never a plausible number.
 - End users **never** touch a connection string or YAML. The bundle's install dialog is what makes
   that literally true rather than aspirational.
@@ -328,6 +408,7 @@ mode, below.
   auth. → **MVP goes local first, designed with a clear path to remote.**
 - **Auth and permissions when several users share one server** — belongs to the Data Governance
   layer; post-MVP.
-- **`semantiql init`** — A3 is the only manual step left in Flow A, and the one that costs the most
-  minutes. It should introspect the schema and write dimensions; measures and metrics need
-  judgement and stay human.
+- **Is `semantiql init` still worth building?** A3's discovery loop covers the same ground with
+  Claude driving `inspect`, and it does the part a wizard cannot: it asks. A non-interactive
+  `init` that writes dimensions only would still earn its place in CI and in a scripted setup, and
+  it is a smaller thing than it looked before `inspect` existed. Undecided, deliberately.
