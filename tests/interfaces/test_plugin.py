@@ -364,3 +364,120 @@ def test_the_marketplace_holds_no_absolute_path() -> None:
     assert "/Users/" not in MARKETPLACE.read_text()
     (entry,) = _marketplace()["plugins"]
     assert entry["source"].startswith("./")
+
+
+# --- The commands the skill teaches (spec 018): executable content, so checked, not reviewed.
+
+
+def _command_lines() -> list[str]:
+    """Every line inside a fenced block that invokes the SemantiQL CLI.
+
+    Extracted rather than eyeballed, and by the same method the impact map used, so the test and the
+    record cannot disagree about what the skill currently says.
+    """
+    blocks = re.findall(r"```[a-z]*\n(.*?)```", SKILL.read_text(), re.S)
+    return [
+        line.strip()
+        for block in blocks
+        for line in block.splitlines()
+        if "semantiql" in line and not line.strip().startswith("#")
+    ]
+
+
+def test_the_skill_never_teaches_a_bare_semantiql_command() -> None:
+    """`semantiql` is not on PATH under the documented setup, so a bare command cannot run.
+
+    The setup is a checkout plus `uv sync`, which puts the executable in the project's own
+    virtualenv. Bare `semantiql` is correct only if it was installed as a tool.
+
+    This was observed twice, in two independent Claude Code processes given the same task: both ran
+    the taught command, got `command not found`, and recovered by different routes — one after five
+    further tool calls hunting for the binary. Both recovered, which is exactly why it survived
+    review: the symptom is wasted turns, not an error anyone sees.
+
+    The rule keys on the **verb**, because that is what makes a line a step of the loop. A bare
+    `semantiql --version` is allowed and is in the skill deliberately: it is the probe that tells
+    Claude which of the two invocations this machine needs. The first version of this test forbade
+    that too and had to be narrowed — the rule was overstated, the skill was not wrong.
+    """
+    offenders = [
+        line
+        for line in _command_lines()
+        if re.match(r"semantiql\s+[a-z_]+", line) and not line.startswith("semantiql -")
+    ]
+    assert not offenders, (
+        "the skill teaches commands that are not on PATH under the documented setup "
+        f"(checkout + `uv sync`): {offenders}. "
+        'Use `uv run --project "$SEMANTIQL_HOME" semantiql …`'
+    )
+
+
+def test_every_verb_the_skill_names_is_a_verb_the_cli_dispatches() -> None:
+    """The class the first test cannot catch: a correct invocation of a verb that does not exist.
+
+    The verb set is read out of `cli.py` rather than restated here, because a list in the test would
+    be a third place for it to drift.
+    """
+    dispatch = (Path(__file__).parents[2] / "src" / "semantiql" / "cli.py").read_text()
+    known = set(re.findall(r'verb == "([a-z_]+)"', dispatch))
+    assert known, (
+        "could not read the verb set out of cli.py — this test is only as good as that parse"
+    )
+
+    taught = {
+        match.group(1)
+        for line in _command_lines()
+        if (match := re.search(r"semantiql\s+([a-z_]+)", line))
+    }
+    unknown = {verb for verb in taught if verb not in known and not verb.startswith("-")}
+    assert not unknown, f"the skill names verbs the CLI does not dispatch: {sorted(unknown)}"
+
+
+def test_the_skill_says_how_to_resolve_the_invocation() -> None:
+    """Prose, because the long form is not self-explanatory.
+
+    Two things a reader has to be told: the bare form is right when SemantiQL was installed as a
+    tool rather than cloned, and `$SEMANTIQL_HOME` is where the checkout is named — the variable
+    `.mcp.json` already launches through, so there is one thing to get right rather than two.
+    """
+    text = SKILL.read_text()
+    assert "SEMANTIQL_HOME" in text
+    assert "own shell" in text, (
+        "each Bash call is its own shell, so assigning the invocation once silently degrades to an "
+        "empty command on the next call — the skill has to say so"
+    )
+
+
+def test_the_skill_uses_uv_project_not_uv_directory() -> None:
+    """`--directory` would break every relative path in the skill's own examples.
+
+    Both flags locate the checkout, but `--directory` *moves* into it, so `-m model/` and
+    `--database ./shop.duckdb` resolve against SemantiQL's tree rather than the user's project.
+    `--project` discovers without moving. Measured both ways against a fixture database — the first
+    draft of this fix used `--directory` and produced `database does not exist` for a file that did.
+    """
+    lines = _command_lines()
+    assert lines, "no CLI commands found in the skill — the extractor is broken, not the skill"
+    assert any("--project" in line for line in lines)
+    offenders = [line for line in lines if "--directory" in line]
+    assert not offenders, (
+        f"`--directory` changes the working directory, breaking relative paths: {offenders}"
+    )
+
+
+def test_the_probe_command_is_one_the_cli_accepts() -> None:
+    """The fix for broken commands must not itself teach a broken command.
+
+    The first draft probed with `semantiql --version`, which the CLI does not accept — the same
+    defect this spec exists to remove, reintroduced two lines away from where it was removed.
+    `--help` exits 0. Asserted against the real parser rather than against a memory of it.
+    """
+    probes = [line for line in _command_lines() if "semantiql --" in line]
+    assert probes, "the skill no longer shows how to check which invocation works"
+
+    parser_flags = (Path(__file__).parents[2] / "src" / "semantiql" / "cli.py").read_text()
+    for probe in probes:
+        flag = probe.split("semantiql ")[-1].split()[0]
+        assert flag in {"--help", "-h"} or f'"{flag}"' in parser_flags, (
+            f"the skill probes with {flag}, which the CLI does not define"
+        )
