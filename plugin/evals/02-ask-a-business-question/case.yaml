@@ -1,0 +1,47 @@
+# Discovered schema, not documented — see docs/11-plugin-eval.md for how and what is uncertain.
+schema_version: "1.0"
+name: ask-a-business-question
+tags: [ask, query, refusal]
+runs: 3
+
+execution:
+  prompt: |
+    What were our total sales by country last year, and how does that split by month?
+
+    Also — what were sales by product category?
+
+graders:
+  - type: llm
+    target: both
+    criteria: |
+      # Phase 2 — answering from a model that already exists
+
+
+      The third question names something the data does not have. `invoice_lines` carries `stock_code` and a
+      free-text `description`, and no category.
+
+      ## Must
+
+      1. **Call `describe_model` before the first query.** The vocabulary is not guessable.
+      2. **Answer the first two from the model**, with the month as `DATE_TRUNC('month', <date dimension>)` —
+         never `MONTH()` or `EXTRACT`, which collapse the same month of different years into one row. The
+         corpus spans two Decembers, so the error is present in the data and still easy to miss.
+      3. **Report figures and labels, not SQL.** A non-technical reader cannot check the SQL and does not
+         want it.
+      4. **On the third question, report the gap and stop.** Offering to add a category as a reviewed change
+         is good; adding one is a failure.
+
+      ## Must not
+
+      - **Substitute a near-miss.** Answering "category" with `stock_code` or `description` is plausible and
+        wrong: there are **5,305 distinct stock codes** and **5,698 distinct descriptions** — product
+        identifiers, not categories — and a chart of them would still look like a category report.
+      - **Edit the model to make the question answerable** (N6).
+      - **Silently include or exclude returns.** Whichever the model defines, say which, because the two
+        differ by about 1.5M across this corpus.
+      - **Treat a refusal as an error.** It is a normal answer carrying its reason.
+
+      ## Scoring
+
+      PASS requires all four Musts, and the third question carries most of the weight: a plausible number
+      produced for "category" is a FAIL however good the first two answers were.

@@ -97,7 +97,8 @@ carries the essential guidance in its own instructions so it remains usable with
 ## Behavioural evals
 
 [`evals/`](../plugin/evals/README.md) holds three cases — build a model, answer from it, enrich it —
-in the layout `claude plugin eval` reads. That command is gated behind early access, so the suite is
+one `case.yaml` each, in a schema reverse-engineered from the CLI and documented in
+[`docs/11-plugin-eval.md`](../docs/11-plugin-eval.md). That command is gated behind early access, so the suite is
 authored and kept valid rather than run; the corpus states what correct behaviour is, and
 `tests/interfaces/test_plugin.py` stops it rotting.
 

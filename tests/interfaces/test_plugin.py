@@ -550,24 +550,64 @@ SKILL_EVALS = PLUGIN / "skills" / "semantiql" / "evals"
 PHASES = ("01-build-the-model", "02-ask-a-business-question", "03-enrich-the-model")
 
 
-def test_every_phase_has_a_case_and_a_grader() -> None:
-    """The layout `claude plugin eval` documents: `evals/**/prompt.md` plus `graders/*.md`.
+def test_every_phase_has_a_case_file() -> None:
+    """`case.yaml` — one of the two shapes `claude plugin eval` reads.
 
-    `prompt.md` and not `case.md`: the shipped CLI binary contains `prompt.md` 56 times and
-    `case.yaml`
-    23 times, and `case.md` zero times. A case named otherwise would simply never be read.
+    Not `case.md`: the shipped binary contains `case.yaml` 23 times and `case.md` zero times, so a
+    case under that name is not read, and the run reports no cases rather than an error. The
+    discovery is written up in `docs/11-plugin-eval.md`.
     """
     for phase in PHASES:
-        case = EVALS / phase
-        assert (case / "prompt.md").is_file(), f"{phase} has no prompt.md"
-        graders = sorted((case / "graders").glob("*.md"))
-        assert graders, f"{phase} has no graders/*.md, so nothing would score it"
+        assert (EVALS / phase / "case.yaml").is_file(), f"{phase} has no case.yaml"
+
+
+def _case(phase: str) -> dict[str, Any]:
+    import yaml
+
+    loaded: dict[str, Any] = yaml.safe_load((EVALS / phase / "case.yaml").read_text())
+    return loaded
+
+
+def _rubric(phase: str) -> str:
+    """Every grader's prose for a case. The rubric is what an `llm` grader judges against."""
+    return " ".join(str(g.get("criteria", "")) for g in _case(phase)["graders"])
+
+
+def test_every_case_carries_the_fields_the_validator_requires() -> None:
+    """Quoted from the binary's own messages, the strongest evidence short of running it.
+
+    `case.yaml must be a YAML object`; `missing required field schema_version (e.g. "1.0")`; and
+    `either execution.prompt or context.history_file is required`. A case missing one fails at load,
+    and that failure would arrive on the day access does — long after anyone remembers writing it.
+    """
+    for phase in PHASES:
+        case = _case(phase)
+        assert isinstance(case, dict), f"{phase}: case.yaml must be a YAML object"
+        assert case.get("schema_version"), f"{phase}: missing schema_version"
+        prompt = (case.get("execution") or {}).get("prompt")
+        history = (case.get("context") or {}).get("history_file")
+        assert prompt or history, f"{phase}: needs execution.prompt or context.history_file"
+        assert case.get("graders"), f"{phase}: no graders, so nothing would score it"
+
+
+def test_every_grader_declares_a_type_the_runner_knows() -> None:
+    """Six types, from the validator: regex | tool_order | tool_used | file_exists | llm | baseline.
+
+    An invented type reads as a working case right up to the first real run, which is what this
+    catches.
+    """
+    known = {"regex", "tool_order", "tool_used", "file_exists", "llm", "baseline"}
+    for phase in PHASES:
+        for grader in _case(phase)["graders"]:
+            assert grader.get("type") in known, (
+                f"{phase}: unknown grader type {grader.get('type')!r}"
+            )
 
 
 def test_each_grader_states_musts_and_how_to_score() -> None:
     """A grader without a scoring rule is an opinion, and an LLM judge will invent the threshold."""
     for phase in PHASES:
-        text = (EVALS / phase / "graders" / "criteria.md").read_text()
+        text = _rubric(phase)
         assert "## Must" in text, f"{phase}: no Must section"
         assert "Must not" in text, f"{phase}: no Must-not section — half a rule is a loophole"
         assert "## Scoring" in text, f"{phase}: no scoring rule"
@@ -580,7 +620,7 @@ def test_the_graders_cite_the_specs_that_created_their_rules() -> None:
     "No raw `psql` (spec 020)" is arguable against. "No raw SQL", alone, is not defensible at 5pm
     when someone needs a number.
     """
-    cited = " ".join((EVALS / phase / "graders" / "criteria.md").read_text() for phase in PHASES)
+    cited = " ".join(_rubric(phase) for phase in PHASES)
     for spec in ("spec 016", "spec 018", "spec 020", "spec 011", "N6"):
         assert spec in cited, f"no grader cites {spec}, so its rule has no provenance"
 
@@ -598,7 +638,7 @@ def test_every_cli_verb_a_grader_names_is_one_the_cli_dispatches() -> None:
 
     named = set()
     for phase in PHASES:
-        text = (EVALS / phase / "graders" / "criteria.md").read_text()
+        text = _rubric(phase)
         named |= {m.group(1) for m in re.finditer(r"semantiql\s+([a-z_]+)", text)}
     unknown = (
         named - known - {"profile"}

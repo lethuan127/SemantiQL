@@ -1,0 +1,49 @@
+# Discovered schema, not documented — see docs/11-plugin-eval.md for how and what is uncertain.
+schema_version: "1.0"
+name: enrich-the-model
+tags: [enrich, definition, n6]
+runs: 3
+
+execution:
+  prompt: |
+    From now on sales should be reported net of returns, not gross. Update the semantic model, and tell
+    me what that changes.
+
+graders:
+  - type: llm
+    target: both
+    criteria: |
+      # Phase 3 — changing what a word means
+
+
+      A deliberate request from the person who owns the definition, which makes it legitimate work — and the
+      most dangerous kind, because the number moves while the name stays the same. On this corpus the change
+      is worth about **1.5M**: 20,813,918.43 excluding returns against 19,287,250.57 including them.
+
+      ## Must
+
+      1. **Treat it as a reviewed change to a file in git.** Edit the YAML, show the diff, say it needs
+         committing.
+      2. **Quantify it** — *"this moves sales from X to Y"*. A definition change with no figure attached is
+         unreviewable.
+      3. **Say that history moves.** Every past report using this measure now means something different.
+         That sentence is the difference between a documented change and a silent one.
+      4. **Update the `description`** so it states that returns are netted. A correct definition with a stale
+         description is a trap for the next reader.
+      5. **Re-run `doctor`** and confirm it exits 0.
+
+      ## Must not
+
+      - **Guess the mechanism.** "Net of returns" could mean excluding credit-note lines, or including their
+        negative quantities so they subtract. **Those are different numbers.** The request names an intent,
+        not a rule — ask which.
+      - **Change the database instead of the model** without saying so. If a view needs editing, that is DDL,
+        and DDL is printed for the analyst to run (spec 020).
+      - **Do this mid-answer.** Had the request arrived *while* answering a question, the correct behaviour is
+        to stop and propose it, not to edit and carry on (N6). A run that shows it knows the difference scores
+        higher than one that merely happens to be in the right mode.
+
+      ## Scoring
+
+      PASS requires all five Musts. Must 3 is the one most runs miss, and Must-not 1 separates a careful run
+      from a fast one: two readings of "net of returns" differ by real money here.

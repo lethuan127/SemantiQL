@@ -87,3 +87,24 @@ the same session — not in any commit, not in a stray path, and I cannot accoun
 from scratch. Worth knowing because it is the second time this session that work outside a commit went
 missing or was silently clobbered, and the lesson is the boring one: an artefact that matters belongs in
 a commit before the next thing starts.
+
+
+# Amendment — the case format, and a defect it uncovered
+
+Recorded after shipping, because it changed a shipped artefact.
+
+**The cases are now one `case.yaml` each**, at the repository owner's direction, replacing
+`prompt.md` + `graders/criteria.md`. Both are shapes the CLI reads. `case.md` was asked for first and is
+**not** read by this version — the binary contains `case.yaml` 23 times and `case.md` zero times — which
+was reported rather than shipped quietly.
+
+**The defect that discovery uncovered:** the original `graders/criteria.md` files carried **no
+frontmatter**, and the binary's validator says
+`grader .md: frontmatter missing type` with `type:` required to be one of
+`regex | tool_order | tool_used | file_exists | llm | baseline`. **The graders as first shipped would have
+been rejected outright.** Nothing in this repository could have caught that, because the runner is gated
+and the tests only checked that the files existed and said certain things. They now assert a valid
+`type:` on every grader, and that check was watched failing against a deliberately invalid type.
+
+The schema — with its four genuinely unresolved edges, including the grader rubric field name — is
+written up in `docs/11-plugin-eval.md`, a **trust-boundary document** added by this amendment.

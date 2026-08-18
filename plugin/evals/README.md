@@ -1,7 +1,10 @@
 # Eval suite
 
-Three cases, one per thing this plugin does. Each is a `prompt.md` handed to an agent and a
-`graders/criteria.md` used to score what it did.
+Three cases, one per thing this plugin does. Each is a single **`case.yaml`**: the prompt handed to an
+agent, and the graders used to score what it did.
+
+The schema is undocumented. It was reverse-engineered from the CLI's own validation messages and is
+written up, with what remains uncertain, in [`../../docs/11-plugin-eval.md`](../../docs/11-plugin-eval.md).
 
 | Case | Asks |
 |---|---|
@@ -17,9 +20,12 @@ claude plugin eval ./plugin --ablation with-without
 
 **That command is gated.** On this account it exits 1 with *"`plugin eval` is currently in early
 access"*, and the gate is an entitlement inside a compiled binary rather than a local flag — there is
-nothing to switch on. The suite is written to the layout the shipped CLI documents
-(`evals/**/prompt.md` plus `graders/*.md`, both confirmed as string literals in the binary; `case.md`
-appears zero times), so it runs the day access arrives.
+nothing to switch on. The suite is written to `evals/**/case.yaml`, one of the two shapes the CLI
+reads, so it runs the day access arrives.
+
+**Add `--strict` on that first run.** It fails on unrecognized fields, which is precisely how to learn
+whether this schema got a field name wrong — `criteria` on a grader is our choice and is the one field
+with no literal behind it.
 
 Until then the corpus still earns its place twice over: it is the clearest statement anyone has of what
 correct behaviour *is*, and `tests/interfaces/test_plugin.py` keeps it valid — every case has a grader,
