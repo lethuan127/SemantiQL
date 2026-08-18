@@ -22,7 +22,21 @@ export SEMANTIQL_HOME=$PWD                              # where SemantiQL is ins
 export SEMANTIQL_MODEL=/absolute/path/to/your/model.yml  # which model to serve
 ```
 
-Then add the plugin from that checkout's `plugin/` directory.
+Then install it. Two commands, from the checkout root:
+
+```bash
+claude plugin marketplace add "$PWD"      # the repo root, NOT plugin/
+claude plugin install semantiql@semantiql
+```
+
+**Why the first command exists.** Claude Code does not install a plugin from a plugin directory. It
+installs from a **marketplace**: a directory carrying `.claude-plugin/marketplace.json`, which lists
+the plugins it offers and where each one lives. The SemantiQL repository is that marketplace, and it
+lists exactly one plugin — this directory. Point `marketplace add` at `plugin/` instead and it fails
+with `Marketplace file not found`, which is the error this README used to walk people into.
+
+Use the default scope. `--scope local` also works and writes an absolute path to your checkout into
+`.claude/settings.local.json`, inside the repository.
 
 **Why `SEMANTIQL_HOME` and not something automatic.** An earlier version of this file derived the
 checkout from the plugin's own location, assuming the plugin is always installed *from inside* the

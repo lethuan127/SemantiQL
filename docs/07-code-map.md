@@ -44,9 +44,13 @@ examples/warehouse/     a worked directory model: one YAML per table, datasource
   semantic_model.yml      the model the README quickstart runs, plus a `.postgres.yml` sibling
 bundle/                 the Claude Desktop bundle's committed parts
   server.py               a three-line entry point; all the logic stays in cli.py, which is tested
+.claude-plugin/         marketplace.json — what makes the plugin *installable*. Shipped product,
+                        and not to be confused with .claude/, which is this repo's own tooling
 plugin/                 the shipped Claude plugin — installs the server *and* the skill
   .claude-plugin/         plugin.json manifest; the location is what makes it discoverable
-  .mcp.json               how to launch the server, via ${CLAUDE_PLUGIN_ROOT} so it is portable
+  .mcp.json               how to launch the server, via ${SEMANTIQL_HOME} — an explicit variable,
+                          because deriving the checkout from the plugin's own location breaks the
+                          moment the plugin is copied or unzipped (spec 013)
   skills/semantiql/       SKILL.md — how Claude should work. Pinned to the engine by tests.
 compose.yaml            a throwaway Postgres for the `pg` suite; CI starts it from this file too
 scripts/

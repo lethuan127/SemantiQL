@@ -28,4 +28,5 @@ bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md)
 * [014-desktop-bundle/](014-desktop-bundle/) - T2, shipped - a relocatable .mcpb bundle that installs by opening it and asks for the model with a file picker
 * [015-model-directory/](015-model-directory/) - T2, shipped - a model may be a directory of YAML files, and describe_model returns a table list so scale does not flood the context
 * [016-schema-discovery/](016-schema-discovery/) - T2, shipped - Claude inspects the database and writes the model itself; the adapter seam gains enumeration
+* [017-plugin-marketplace/](017-plugin-marketplace/) - T2, shipped - a root marketplace manifest so the documented plugin install can actually be followed, plus a gate step that proves it stays true
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above

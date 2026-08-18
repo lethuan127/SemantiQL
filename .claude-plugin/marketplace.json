@@ -1,0 +1,17 @@
+{
+  "name": "semantiql",
+  "owner": {
+    "name": "Thuan Le",
+    "url": "https://github.com/lethuan127"
+  },
+  "description": "SemantiQL — ask questions about a SQL database in plain language, through a reviewed semantic model that refuses rather than guesses.",
+  "plugins": [
+    {
+      "name": "semantiql",
+      "source": "./plugin",
+      "description": "Ask questions about a SQL database in plain language, through a reviewed semantic model that refuses rather than guesses.",
+      "category": "development",
+      "keywords": ["semantic-layer", "sql", "duckdb", "postgres", "analytics"]
+    }
+  ]
+}
