@@ -185,3 +185,23 @@ def test_a_yearly_grain_keeps_the_total(model: SemanticModel, adapter: DuckDBAda
     result = _result("SELECT revenue, DATE_TRUNC('year', order_date) FROM orders", model, adapter)
     assert len(result.rows) == 1
     assert round(float(result.rows[0][result.columns.index("revenue")]), 2) == 1686.24
+
+
+def test_a_monthly_series_comes_back_in_month_order(
+    model: SemanticModel, adapter: DuckDBAdapter
+) -> None:
+    """Spec 019, end to end: the unit tests prove the `OrderKey`, only this proves the rows.
+
+    The query is the one a Claude wrote against 2.96M real taxi trips and was refused: repeating
+    select-list expression in ORDER BY, which is ordinary SQL.
+    """
+    result = _result(
+        "SELECT revenue, DATE_TRUNC('month', order_date) FROM orders "
+        "ORDER BY DATE_TRUNC('month', order_date) DESC",
+        model,
+        adapter,
+    )
+    bucket = result.columns.index("order_date_month")
+    months = [row[bucket] for row in result.rows]
+    assert months == sorted(months, reverse=True), f"not in month order: {months}"
+    assert len(months) > 1, "a single bucket would not prove an ordering"
