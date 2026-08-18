@@ -87,8 +87,31 @@ status: stable
 4. In Claude Code, ask for a model for a database you have. Expect to be **asked** which aggregation
    is revenue and what a row is. If it picks one silently, FR-9 has regressed and no test caught it.
 
-**Steps 1–3 were run and their output is quoted in \`docs/03-setup-workflow.md\` A3. Step 4 has not
-been run**, and cannot be from inside this repository: it needs a fresh Claude session with the
-plugin installed, which is the same limit spec 013 recorded for its own install step. What is
-testable about it — that the skill *contains* the instruction and the questions — is AC-8 and AC-9;
-that Claude *obeys* it is not something a test here can assert.
+**Steps 1–3 were run and their output is quoted in `docs/03-setup-workflow.md` A3.**
+
+**Step 4 has now been run, twice, and it passes** — recorded here by spec 018, which is the change
+that running it produced. Two independent `claude` processes were given the same request against a
+purpose-built ambiguous DuckDB fixture: eleven columns, five of them money (`gross_amount`,
+`discount_amount`, `refund_amount`, `net_amount`, `unit_price`), one row per order *line* with an
+order spanning two lines, a `timestamptz`, and a customer email.
+
+- **Interactive, in tmux — the run that answers FR-9.** It loaded the skill, ran `inspect`, then
+  **stopped and asked, before writing any YAML**: *"Which column is the sanctioned definition of
+  revenue?"* offering `net_amount` / `gross_amount` / both-separately-named beside the figures
+  (65.00 gross, 63.00 net of discount, 33.00 net) and noting that row 2 is a fully refunded line; and
+  *"placed_at carries a timezone. Which timezone should months be bucketed in?"* showing that
+  `2026-07-31 23:30Z` is July in UTC and August in Asia/Bangkok, splitting one month across two.
+  Better than FR-9 requires: each question carried the numeric consequence of answering it wrongly.
+- **Headless (`claude -p`) — what a harness with no TTY can and cannot show.** With nothing to ask,
+  the same skill chose `net_amount`, disclosed the choice with its 33.00-versus-65.00 consequence, and
+  invited correction. `doctor` exited 0, and both queries it reported were re-run here and matched
+  exactly. It also derived `count_distinct(order_id)` unprompted, catching the order-line grain trap.
+  One flaw belongs to the harness rather than the skill: the YAML it wrote called its own choice *"the
+  sanctioned definition of revenue"*, asserting a sanction nobody had given — which is what the
+  interactive run shows the skill avoids when it has somewhere to ask.
+
+**What running it actually found was a different defect**, and one no amount of reading would have
+surfaced: both runs failed on the skill's very first command, because it taught bare
+`semantiql inspect` and the executable is not on `PATH` under the documented setup. Both recovered —
+one after five extra tool calls hunting for the binary — which is precisely why it had survived.
+Fixed in spec 018, with the drift test that would have caught it.

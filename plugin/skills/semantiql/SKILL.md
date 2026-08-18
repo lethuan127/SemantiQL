@@ -128,17 +128,45 @@ produced; do not volunteer it to a non-technical reader.
 When someone asks you to create or extend a model, you have a shell and file-writing tools. Use
 them: **you** write the YAML. Do not ask the user to hand-write it, and do not invent a schema.
 
+### First, work out how to run the CLI
+
+Do this once, before step 1. **`semantiql` is usually not on `PATH`.** The documented setup is a git
+checkout plus `uv sync`, which puts the executable inside that project's own virtualenv, so the bare
+command fails with `command not found` — inside the checkout as much as outside it.
+
+```bash
+uv run --project "$SEMANTIQL_HOME" semantiql --help   # a checkout: the common case
+semantiql --help                                     # installed as a tool: bare works
+```
+
+Run one, and use whichever answered for every command below.
+
+**Write it out in full each time.** Each Bash call is its own shell, so assigning it to a variable
+once looks tidy and then silently expands to nothing on the next call — which reads as a broken CLI
+rather than a broken variable.
+
+If neither form works, `$SEMANTIQL_HOME` is unset. **Ask where the SemantiQL checkout is**; do not
+guess at a path or go hunting through the filesystem.
+
+`--project` and not `--directory`: both find the checkout, but `--directory` **moves** there, so
+`-m model/` and `--database ./shop.duckdb` would resolve against SemantiQL's own tree instead of the
+user's. `--project` leaves you where you are, which is what every relative path below assumes.
+
+The examples below use the checkout form, since that is what a builder following the setup workflow
+has.
+
 ### The loop
 
 **1. See what is actually there.**
 
 ```bash
-semantiql inspect --datasource postgres --json          # the relations
-semantiql inspect --table orders --json                  # one relation's columns
+uv run --project "$SEMANTIQL_HOME" semantiql inspect --json                 # the relations
+uv run --project "$SEMANTIQL_HOME" semantiql inspect --table orders --json  # one relation's columns
 ```
 
 `inspect` needs no model — it is what runs before one exists. Every option the other verbs take for
-choosing a datasource applies here too.
+choosing a datasource applies here too; DuckDB is the default, so add `--datasource postgres` only
+when that is what you are pointed at.
 
 List first, then inspect only the relations you are going to model. A warehouse can have hundreds of
 tables and pulling every column of every one into the conversation wastes the context you need for
@@ -179,7 +207,7 @@ already in the model's vocabulary.
 **5. Check what you wrote, and fix it.**
 
 ```bash
-semantiql doctor -m model/
+uv run --project "$SEMANTIQL_HOME" semantiql doctor -m model/
 ```
 
 `doctor` compares your files against the real schema and names every disagreement — a column that
