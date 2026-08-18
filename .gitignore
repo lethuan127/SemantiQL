@@ -32,3 +32,6 @@ dist/
 
 # Agent worktrees are scratch checkouts, never repository content.
 .claude/worktrees/
+
+# A local rig for exercising the discovery loop by hand. Regenerate it with its own build.py.
+.test-workspace/
