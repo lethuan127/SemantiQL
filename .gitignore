@@ -29,3 +29,6 @@ dist/
 # Claude Code writes an absolute path to the installed marketplace here, so it can never be
 # committed: it would carry one developer's home directory into everyone else's checkout.
 .claude/settings.local.json
+
+# Agent worktrees are scratch checkouts, never repository content.
+.claude/worktrees/
