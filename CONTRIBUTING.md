@@ -35,6 +35,10 @@ Check it worked:
 uv run semantiql "SELECT revenue, channel FROM orders" --show-sql
 ```
 
+**On a new machine, read [docs/12-development-environment.md](docs/12-development-environment.md).**
+It lists every optional tool, what each unlocks, and what breaks without it — plus the two
+things that cannot be reproduced anywhere right now.
+
 ## Git hooks
 
 Optional but recommended — one command wires them up:
