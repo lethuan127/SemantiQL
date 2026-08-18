@@ -1,0 +1,6 @@
+# Declared exactly once for the whole model directory.
+version: 1
+
+datasource:
+  name: CHANGE_ME # a label for this connection
+  dialect: duckdb # duckdb | postgres — must match how the model is run

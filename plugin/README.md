@@ -96,38 +96,70 @@ carries the essential guidance in its own instructions so it remains usable with
 
 ## Scoring the skill
 
-[PluginEval](https://github.com/wshobson/agents) (MIT) scores a skill on ten dimensions. It is a
-**developer tool, not a gate**: it needs a third-party plugin installed and makes LLM calls, so it
-stays out of `scripts/verify.sh` and out of CI.
+[PluginEval](https://github.com/wshobson/agents) (MIT) scores the skill on ten dimensions across two
+layers. Run it with thresholds:
 
 ```bash
 claude plugin marketplace add wshobson/agents
 claude plugin install plugin-eval@claude-code-workflows
 
-P=~/.claude/plugins/cache/claude-code-workflows/plugin-eval/0.1.1
-cd "$P" && uv run --extra llm plugin-eval score \
-  /path/to/semantiql/plugin/skills/semantiql --depth standard
+uv run python scripts/eval_plugin.py                      # 3 runs, static>=0.95 judge>=0.90
+uv run python scripts/eval_plugin.py --runs 5
 ```
 
-**Result as of spec 020: 73.0/100, Silver, and no anti-patterns detected** at either the static or
-judge layer. Token efficiency scored 0.962 (A) and triggering accuracy 0.801 (B-) under the LLM judge.
+**Not in `scripts/verify.sh`, deliberately.** It needs a third-party plugin installed and makes LLM
+calls, so gating CI on it would break every fork PR and spend money per commit. It skips with an
+install hint when PluginEval is absent.
 
-### Four dimensions we deliberately do not chase
+### Where it stands
 
-The remaining gap is mostly convention-scoring, and closing it would mean gaming a regex rather than
-improving the skill. Recorded here so it is a decision rather than an oversight, and so nobody
-re-litigates it from the number alone. Read from the tool's own source, not inferred:
+| Layer | Score | Target | Met |
+|---|---|---|---|
+| static | **0.9564**, identical on every run | > 0.95 | yes |
+| judge | median **0.82**, range 0.667–0.895 across 12 runs | > 0.90 | no — see below |
 
-| Dimension | What it actually rewards | Why we leave it |
-|---|---|---|
-| Progressive disclosure 0.60 | 281 lines is inside its **ideal** 200–600 band, which caps at 0.60; the rest needs `references/` and `assets/` directories | We would be adding directories we have no content for |
-| Ecosystem coherence 0.50 | baseline 0.50, +0.25 for cross-references to other skills, +0.25 for containing "related" / "see also" / "companion" | The plugin ships one skill. It is standalone, and the phrase is a regex match, not a fact |
-| Frontmatter, name portion | +0.15 only when the skill's `name` **differs** from its directory | They match, which is the convention everywhere else |
-| Frontmatter, "pushiness" | the literal words "proactively", "automatically", "always use"; and ≥3 comma-separated "when …ing" clauses | Keyword stuffing. It changes whether a regex fires, not whether the skill does |
+Static breakdown, all deterministic:
 
-`AGENTS.md` forbids weakening a check to make it pass. Inflating a metric without improving the thing
-it measures is the same trade in the other direction, so the number stays at 73.
+| Dimension | Score |
+|---|---|
+| orchestration_wiring, progressive_disclosure, structural_completeness, harness_portability | 1.000 |
+| token_efficiency | 0.966 |
+| frontmatter_quality | 0.920 |
+| ecosystem_coherence | 0.750 |
 
-**The one signal worth returning to** is Output Quality, which the LLM judge scored 0.620 (D-). Unlike
-the four above, that is a judgement about the skill's substance rather than its shape — but the tool
-reports no reason, so acting on it needs the judge's transcript, which `--depth deep` may expose.
+**The static gains came from real content**, not from satisfying regexes: worked examples, a
+troubleshooting table of failures actually hit while building this, an input/output contract, a
+"which verb when" comparison, `references/` for the refusal catalogue and field reference, and
+`assets/` templates for starting a model. The skill grew 280 → ~430 lines and every section is
+material a reader needs.
+
+Two static points are left on the table on purpose. `frontmatter_quality` caps at 0.920 because the
+remaining 0.05 requires the skill's `name` to **differ** from its directory, and `ecosystem_coherence`
+caps at 0.750 because the remaining 0.25 requires a literal `skills/<other-skill>` path in the body —
+the plugin ships one skill, so that reference would have to be invented.
+
+### Why the judge target is not met, and what would meet it
+
+Two structural facts, both read out of PluginEval's source rather than inferred:
+
+**The judge reads only the first 3000 characters** of `SKILL.md`. That is why the opening now carries
+the tool contract, the in-scope/refused table, the two non-negotiable limits and three worked
+request→reply examples — everything a cold reader needs, before the detail. Finding this changed the
+document for the better; it is the one scoring quirk that turned out to be sound advice.
+
+**`scope_calibration` scores 0.75 in every single run and never moves.** Its rubric awards 1.0 to
+"minimal surface area, maximum cohesion". This skill deliberately does two jobs — answering questions
+*and* building the model — so 0.75 is the rubric correctly describing it. The judge score is a plain
+mean of four dimensions, so **while both jobs live in one skill the ceiling is (1+1+1+0.75)/4 =
+0.9375**, with `output_quality` the noisiest dimension between here and there.
+
+**The honest route to > 0.90 is to split the skill in two** — `semantiql` for answering, and a
+modelling skill for the discovery loop. Each becomes cohesive enough to score near 1.0 on scope, and
+they would legitimately cross-reference each other, which also closes the `ecosystem_coherence` gap
+without inventing anything. That is a restructure of shipped product with its own drift tests, manifest
+and docs, so it belongs in its own spec rather than being smuggled in behind a score.
+
+**The judge is noisy and one run is not a measurement.** On byte-identical content it has returned
+judge scores from 0.667 to 0.895, with `output_quality` alone ranging 0.40–0.83 and
+`triggering_accuracy` 0.75–1.00. `scripts/eval_plugin.py` therefore samples and reports the median and
+the range; gating on a single run would be a coin toss dressed as a check.

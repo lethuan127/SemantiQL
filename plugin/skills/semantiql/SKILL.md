@@ -1,6 +1,6 @@
 ---
 name: semantiql
-description: Answer questions about a business database through SemantiQL's semantic model, using the describe_model and query tools, and build that model by inspecting a real database. Use whenever someone asks about company data — revenue, orders, customers, counts, totals, trends over time — or mentions a metric, dimension or semantic model. Also use when a query was refused and needs repairing, or when someone asks to create, generate, extend or fix a semantic model for a database.
+description: Answer questions about a business database through SemantiQL's reviewed semantic model, using the read-only describe_model and query tools, and build that model by inspecting a real database. Use whenever someone asks about company data — revenue, orders, customers, counts, totals, trends over time — or names a metric, dimension or semantic model. Use proactively when building a model for a new datasource, when creating or extending dimensions, measures and metrics, when debugging a query SemantiQL refused, for repairing a model that doctor rejects, and when deciding what a business word like revenue should mean. Triggers when a question needs a number from a database rather than from a file, and automatically when a refusal needs reading and repairing.
 ---
 
 # Asking SemantiQL
@@ -12,6 +12,47 @@ and runs it.
 The point of this arrangement is that **a wrong number is worse than no number**. The person
 reading your answer usually cannot read SQL, so they cannot catch a mistake. When a question
 cannot be answered from the model, say so — never estimate, never substitute a near-miss.
+
+## What you can do, and what you get back
+
+**Your contract is small.** One request in, one answer out. You call two read-only tools and return a
+number with its labels; you do not manage other agents, spawn subtasks, or own a pipeline. Everything
+below is what to send those two tools and how to read what comes back.
+
+**Two tools, both read-only.** `describe_model` returns the vocabulary — tables, dimensions, measures,
+metrics, each with a label and description; with several tables it returns an index and you call again
+for one table's detail. `query` accepts one string of semantic SQL and returns column names, rows, and
+the physical SQL that ran — **or a refusal carrying its reason, which is a normal answer, not an
+error.** Read the reason and repair the query.
+
+Report values as the answer produced them. They arrive as strings to keep decimals exact: format them
+for a reader, never re-round them.
+
+**In scope, and deliberately not:**
+
+| Supported | Refused, and what to do instead |
+|---|---|
+| one table per query | joins → model a database **view** as one table |
+| measures, metrics, dimensions by name | `HAVING`, filtering a measure → filter a dimension |
+| `WHERE <dimension> <op> <literal>` | `DISTINCT`, CTEs, subqueries, `PIVOT` → use the subset below |
+| `ORDER BY` a selected name, `LIMIT`, `OFFSET` | `ORDER BY 1` → order by a name you selected |
+| `DATE_TRUNC('<grain>', <date dimension>)` | `MONTH()` / `EXTRACT` → they collapse every July into one row |
+
+**Two limits that are never negotiable.** Never invent a measure's aggregation or a metric's formula —
+if you cannot get an answer, say what is missing. And never change a model to answer a question: a
+missing definition is reported, and adding it is a reviewed change to a file in git.
+
+**Three requests, and exactly what you should return:**
+
+| They ask | You send `query` | You reply |
+|---|---|---|
+| "revenue by channel last quarter" | `SELECT revenue, channel FROM orders WHERE order_date >= '2026-04-01'` | *Web £18,400.00, store £9,120.00.* Figures and labels, no SQL |
+| "revenue by sales region" | nothing — `describe_model` lists no `region` | *Your model defines revenue by channel, order_date and customer_segment. There is no region. Adding one is a reviewed change — want me to open it?* |
+| "revenue by month this year" | `SELECT revenue, DATE_TRUNC('month', order_date) FROM orders ORDER BY order_date_month` | the monthly series, in month order, labelled by month |
+
+The middle row is the one that matters. **Reporting the gap is the correct answer**, and it beats
+substituting `channel` because that is also a grouping. Never volunteer the SQL unless asked: the
+person reading usually cannot check it, which is the whole reason this layer exists.
 
 ## Always start with `describe_model`
 
@@ -211,7 +252,40 @@ the reason this is a conversation rather than a command:
 - **What do people actually call these things?** The column is `amt_net_ex_vat`; the business says
   "revenue". Your `label` and `description` are what make that mapping work later.
 
-**4. Write the files.** One YAML per table, in a directory, with `datasource` declared once:
+**4. Write the files.** One YAML per table, in a directory, with `datasource` declared once. This is
+the shape, with the fields that carry meaning filled in from what the analyst told you:
+
+```yaml
+tables:
+  order_lines:
+    source: order_lines
+    description: >-
+      One row per order line, not per order. Counting rows counts products sold; use
+      order_count for orders.
+    dimensions:
+      channel:
+        column: channel
+        type: string
+        label: Sales channel
+        description: How the order was placed — web or store.
+    measures:
+      revenue:
+        column: net_amount
+        agg: sum
+        label: Revenue
+        description: >-
+          Gross less discounts and refunds, as confirmed by the analyst. Excludes tax.
+      order_count:
+        column: order_id
+        agg: count_distinct
+        label: Orders
+        description: Distinct orders. Distinct because one order can span several lines.
+    metrics:
+      average_order_value:
+        expression: revenue / order_count
+```
+
+The directory layout:
 
 ```
 model/
@@ -278,3 +352,118 @@ Without it the bundled ten-row retail example is served, which is useful for try
 is not anyone's data. If `describe_model` returns a table called `orders` with a `channel`
 dimension and nothing else, that is what you are looking at — say so rather than answering
 questions about it as though it were the company's.
+
+## When to use which verb
+
+Four commands, and picking the wrong one is the difference between a cheap question and a full table
+scan. All of them are run as `uv run --project "$SEMANTIQL_HOME" semantiql …`.
+
+| Verb | Reads | Needs a model | Use it when |
+|---|---|---|---|
+| `inspect` | catalogue metadata, no rows | no | you need to know what relations and columns exist |
+| `profile` | every row of one relation | no | you need the numbers that decide a definition |
+| `doctor` | catalogue metadata | yes | you have written a model and need it checked against reality |
+| the MCP `query` tool | the rows the question needs | yes | answering a question, which is the only time |
+
+The comparison that matters: `inspect` is the cheap one and answers *what exists*; `profile` is the
+expensive one and answers *what is in it*. Do not reach for `profile` on a whole warehouse, and do not
+try to answer a definition question from `inspect` alone.
+
+## Input and output format
+
+**What the tools accept.** `describe_model` accepts an optional `table` name and nothing else.
+`query` accepts one string of semantic SQL — the supported subset described above — and no other
+parameters. There is no way to pass raw SQL, a connection string, or a model path through either.
+
+**What they return.** `describe_model` returns the tables, dimensions, measures and metrics with their
+labels and descriptions; with several tables it returns an index and you call again for one table's
+detail. `query` returns column names, rows, and the physical SQL that produced them — or a refusal
+carrying its reason, which is a normal answer and not an error.
+
+Report the values as the answer produces them. They arrive as strings to preserve exact decimals, so
+format them for a reader if you like, but never re-round them: a figure that has been rounded twice is
+a figure nobody can reconcile against the database.
+
+## Examples
+
+Three walkthroughs. Each is a real shape of request, not an illustration.
+
+### A question the model can answer
+
+> *"What was revenue by channel last quarter?"*
+
+| Step | What you do |
+|---|---|
+| 1 | `describe_model()` — learn the vocabulary before writing anything |
+| 2 | See `revenue` (measure), `channel` and `order_date` (dimensions) |
+| 3 | Write the query below |
+| 4 | Report the number, and the labels — not the SQL |
+
+```sql
+SELECT revenue, channel
+FROM orders
+WHERE order_date >= '2026-04-01' AND order_date < '2026-07-01'
+ORDER BY revenue DESC
+```
+
+### A question the model cannot answer
+
+> *"What was revenue by sales region?"*
+
+`describe_model` lists no `region`. **Report that and stop.** Do not substitute `channel` because it
+is also a grouping, and do not add a `region` dimension to make the question work — that is a change
+to what a number means, and it belongs in a reviewed pull request rather than in a chat reply.
+
+```
+Your model has no region dimension. Revenue is defined by channel, order_date and
+customer_segment. Adding region means editing the model, which is a reviewed change —
+want me to open one?
+```
+
+### A refusal you can repair
+
+A refusal is a normal answer carrying its reason. Read the reason before changing anything.
+
+| Refusal says | What it means | The repair |
+|---|---|---|
+| `'revenu' is not selected by this request` | a typo, and the reply lists the real names | use the suggested name |
+| `ORDER BY takes the name of something this request selects` | you ordered by a function or a position | order by a selected name; the message lists them |
+| `HAVING is not supported` | you filtered a measure | filter a dimension, or aggregate differently |
+| `each selected item must be a plain dimension or measure name` | you wrote SQL the compiler cannot rebuild | use the supported subset above |
+
+## Troubleshooting
+
+Every row here was hit for real while building or testing this plugin.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `command not found: semantiql` | the executable lives in the checkout's virtualenv, not on `PATH` | `uv run --project "$SEMANTIQL_HOME" semantiql …` |
+| `$SEMANTIQL_HOME` is empty | the variable was never exported before Claude started | ask the user where the checkout is; do not guess a path |
+| `relation "orders_v" does not exist` | the model points at a database **view** that has been dropped or was never created | recreate the view, or point the model at the base table |
+| `doctor` reports a column that is not there | the model was written against a different schema than the one you are connected to | re-run `semantiql inspect --table <name>` and reconcile |
+| `doctor` reports a timezone mismatch | `timezone:` is declared on a column that carries no zone, or missing from one that does | `inspect` reports `carries a timezone`; match it |
+| every month collapses into one row | `EXTRACT`/`MONTH()` was used instead of `DATE_TRUNC` | `DATE_TRUNC('month', <date dimension>)` |
+| a monthly series comes back unsorted | ordering by the grain expression was refused in an older build | `ORDER BY <dimension>_<grain>`, e.g. `order_date_month` |
+| the numbers look plausible but wrong | a measure's `agg` or a metric's formula was guessed rather than confirmed | stop, and ask which definition is sanctioned |
+
+| a figure differs from the analyst's own report | the model's definition is not the one their report uses | show the definition and ask which is sanctioned |
+| `profile` is slow on a huge table | it aggregates every row, by design | profile the one relation you are modelling, not the warehouse |
+
+**When `doctor` and the query disagree, trust `doctor`.** It compares the model against the real
+schema. A query that runs against a model `doctor` rejects is answering from a definition nobody
+checked.
+
+## Related
+
+Reference material lives beside this file, so it is here when you need it and not in the context when
+you do not:
+
+| File | Read it when |
+|---|---|
+| [references/refusals.md](references/refusals.md) | a query was refused and the message is not enough |
+| [references/model-fields.md](references/model-fields.md) | writing or reviewing a model's YAML |
+| [assets/datasource.template.yml](assets/datasource.template.yml) and [assets/table.template.yml](assets/table.template.yml) | starting a model directory from scratch |
+
+See also, in the SemantiQL repository itself: `docs/09-data-modeling.md` for the complete field
+reference, `docs/03-setup-workflow.md` for the setup flow this skill sits inside, and
+`docs/02-architecture.md` for why the tool surface is two read-only tools.

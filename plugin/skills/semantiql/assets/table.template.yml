@@ -1,0 +1,32 @@
+# One file per table. Copy, rename, and replace every CHANGE_ME.
+#
+# Fill `description` from what a human told you, never from the column name. The label and description
+# are what let a question about "sales channel" find the column called `chan_cd`.
+tables:
+  CHANGE_ME_table:
+    source: CHANGE_ME_relation
+    description: >-
+      CHANGE_ME — say what one row *is*, and name the trap. "One row per order line, not per
+      order" is the kind of sentence that prevents a whole class of wrong answer.
+
+    dimensions:
+      CHANGE_ME_dimension:
+        column: CHANGE_ME_column
+        type: string # string | date | number | boolean
+        label: CHANGE_ME
+        description: CHANGE_ME
+      # For a column `inspect` reports as carrying a timezone, and only then:
+      # occurred_at:
+      #   column: occurred_at
+      #   type: date
+      #   timezone: UTC        # ask which zone the business means; there is no safe default
+
+    measures:
+      CHANGE_ME_measure:
+        column: CHANGE_ME_column
+        agg: sum # sum | count | count_distinct | min | max | avg — ask, never guess
+        label: CHANGE_ME
+        description: >-
+          CHANGE_ME — say what this figure excludes as well as what it includes.
+
+    metrics: {}
