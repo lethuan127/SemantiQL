@@ -31,4 +31,5 @@ bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md)
 * [017-plugin-marketplace/](017-plugin-marketplace/) - T2, shipped - a root marketplace manifest so the documented plugin install can actually be followed, plus a gate step that proves it stays true
 * [018-skill-runnable-commands/](018-skill-runnable-commands/) - T2, shipped - the discovery loop taught a command that is not on PATH; two independent Claude runs hit it, and a drift test now catches it
 * [019-order-by-a-selected-grain/](019-order-by-a-selected-grain/) - T2, shipped - ORDER BY a time grain the request selects now works, and no ordering refusal is silent about what you may order by
+* [020-profile-through-semantiql/](020-profile-through-semantiql/) - T2, shipped - a read-only profile verb so the discovery loop stops reading rows with raw psql, and a skill rule with a test
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above

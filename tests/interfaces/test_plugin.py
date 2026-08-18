@@ -481,3 +481,56 @@ def test_the_probe_command_is_one_the_cli_accepts() -> None:
         assert flag in {"--help", "-h"} or f'"{flag}"' in parser_flags, (
             f"the skill probes with {flag}, which the CLI does not define"
         )
+
+
+# --- Reading rows through SemantiQL rather than through psql (spec 020).
+
+
+def test_the_skill_teaches_profile() -> None:
+    """The verb that replaces the improvised SQL.
+
+    Without it the prohibition below would just remove a capability: pricing a revenue question
+    needs
+    the sums, and `inspect` reports metadata only.
+    """
+    text = SKILL.read_text()
+    assert "semantiql profile" in text
+    assert "value distribution" in text
+
+
+def test_the_skill_forbids_running_sql_against_the_database() -> None:
+    """The actual fix, and the reason it is a test.
+
+    Spec 016 put row-level profiling out of scope — in a spec. The skill never said so, and a run
+    over 2.96M real rows read every figure it showed the analyst with twelve raw `psql` calls,
+    including a join and a `CREATE OR REPLACE VIEW`. An exclusion that lives only in a spec is a
+    suggestion; this is what makes it a rule.
+    """
+    text = SKILL.read_text()
+    assert "Never run SQL against the database yourself" in text
+    for client in ("psql", "duckdb"):
+        assert client in text, f"the prohibition must name {client} explicitly to be followable"
+
+
+def test_the_skill_forbids_writing_to_the_database() -> None:
+    """N5 by instruction, since a shell bypasses the engine's non-SELECT refusal entirely.
+
+    The observed run executed DDL. The analyst had approved the view, so the intent was sound — but
+    an object the model depends on should be created by the person who owns the database, and the
+    skill now prints the SQL instead of running it.
+    """
+    text = SKILL.read_text()
+    assert "Never write to the database" in text
+    assert "print the SQL" in text
+
+
+def test_the_skill_still_names_no_tool_the_server_lacks() -> None:
+    """`profile` is a command, like `inspect` and `doctor` — not a third MCP tool.
+
+    The asking surface stays two tools. Discovery has a shell; answering does not, and that
+    asymmetry
+    is the enforcement boundary rather than an oversight.
+    """
+    text = SKILL.read_text()
+    for invented in ("profile_table", "profile_relation", "describe_datasource"):
+        assert invented not in text

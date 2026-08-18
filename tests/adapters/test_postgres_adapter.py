@@ -194,3 +194,57 @@ def test_enumeration_leaves_no_open_transaction(postgres_adapter: PostgresAdapte
     finally:
         observer.close()
     assert row is not None and row[0] == "idle", f"backend is {row and row[0]!r} after tables()"
+
+
+# --- profile (spec 020)
+
+
+@pytest.mark.pg
+def test_profile_reports_rows_sums_and_a_distribution(
+    postgres_adapter: PostgresAdapter, postgres_corpus: str
+) -> None:
+    """The same contract as DuckDB's, which is what makes the verb usable on either engine."""
+    profile = postgres_adapter.profile("orders")
+    assert profile.rows > 0
+    by_name = {c.name: c for c in profile.columns}
+    assert by_name["amount"].total is not None, "a numeric column must carry a sum"
+    channel = by_name["channel"]
+    assert channel.values is not None, "a two-value column must carry its distribution"
+    assert sum(count for _, count in channel.values) == profile.rows - channel.nulls
+
+
+@pytest.mark.pg
+def test_profile_sums_exactly_rather_than_in_floating_point(
+    postgres_adapter: PostgresAdapter, postgres_corpus: str
+) -> None:
+    """Each value is cast to `numeric` before summing, not the total afterwards.
+
+    Measured on 2.96M real rows: `sum(fare_amount)::numeric` returned 53882224.7599785 and
+    `sum(fare_amount::numeric)` returned 53882224.76. The first version of this cast was in the
+    wrong
+    place, and the drift in the output is what caught it.
+    """
+    from decimal import Decimal
+
+    total = {c.name: c for c in postgres_adapter.profile("orders").columns}["amount"].total
+    assert isinstance(total, Decimal), f"expected an exact Decimal, got {type(total).__name__}"
+
+
+@pytest.mark.pg
+def test_profile_leaves_no_open_transaction(
+    postgres_adapter: PostgresAdapter, postgres_corpus: str, postgres_dsn: str
+) -> None:
+    """`autocommit` is off because that is what makes `read_only` real, which leaves a transaction
+    open after a fetch — pinning a snapshot until something ends it. `execute` already rolls back;
+    profiling reads far more rows, so it matters more here, not less.
+    """
+    import psycopg
+
+    postgres_adapter.profile("orders")
+    with psycopg.connect(postgres_dsn) as observer, observer.cursor() as cur:
+        cur.execute(
+            "SELECT state FROM pg_stat_activity WHERE pid = %s",
+            (postgres_adapter._conn.info.backend_pid,),
+        )
+        (state,) = cur.fetchone() or (None,)
+    assert state == "idle", f"connection left {state!r}, holding a snapshot open"

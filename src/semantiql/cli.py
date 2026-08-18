@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from semantiql import __version__
-from semantiql.adapters.base import Adapter, AdapterError
+from semantiql.adapters.base import Adapter, AdapterError, RelationProfile
 from semantiql.adapters.duckdb import DuckDBAdapter
 from semantiql.adapters.postgres import PostgresAdapter
 from semantiql.doctor import Finding, check, problems
@@ -193,6 +193,101 @@ def _inspect(args: argparse.Namespace) -> int:
         return 0
     print(_render_inspection(payload))
     return 0
+
+
+def _profile(args: argparse.Namespace) -> int:
+    """Report what is *in* a relation. Needs no model, and reads rows — which `inspect` does not.
+
+    The two verbs are separate on purpose. `inspect` answers "what columns exist", which is
+    metadata;
+    this answers "what is in them", which reads every row. Those are different claims to make on
+    someone's database and folding them together would hide the bigger one behind the smaller.
+
+    It exists because the alternative was observed and is worse. A discovery run over 2.96M real
+    taxi
+    trips used `inspect` correctly for metadata and then **raw `psql`** for every figure it showed
+    the
+    analyst — twelve calls, including a join and a `CREATE OR REPLACE VIEW`. Those figures decided
+    what "revenue" would mean in the model. They were right, but nothing made them right, and a
+    plausible wrong number arriving at that moment is the failure this project exists to prevent
+    (spec 020).
+
+    `--table` is required rather than defaulting to everything: reading rows should take a
+    deliberate
+    argument, not happen because a flag was omitted.
+    """
+    if not args.table:
+        print(
+            "error: profile needs --table <relation>. It reads every row, so it does not "
+            "default to the whole datasource — run `semantiql inspect` first to see what exists.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        adapter = _open_adapter(args)
+    except AdapterError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
+    try:
+        profile = adapter.profile(args.table)
+    except AdapterError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+    finally:
+        adapter.close()
+
+    payload: dict[str, object] = {
+        "source": profile.source,
+        "rows": profile.rows,
+        "columns": [
+            {
+                "name": column.name,
+                "nulls": column.nulls,
+                "distinct": column.distinct,
+                "minimum": None if column.minimum is None else str(column.minimum),
+                "maximum": None if column.maximum is None else str(column.maximum),
+                "total": None if column.total is None else str(column.total),
+                "values": None
+                if column.values is None
+                else [[None if v is None else str(v), n] for v, n in column.values],
+            }
+            for column in profile.columns
+        ],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+    print(_render_profile(profile))
+    return 0
+
+
+def _render_profile(profile: RelationProfile) -> str:
+    """The human form. One line per column, and the value distribution indented under it.
+
+    Numbers are rendered as text exactly as the database returned them — no reformatting, because a
+    figure that is about to become a business definition should be the database's answer rather than
+    this file's opinion of it.
+    """
+    lines = [f"{profile.source}:  {profile.rows:,} rows", ""]
+    width = max((len(c.name) for c in profile.columns), default=0)
+    for column in profile.columns:
+        facts = [f"nulls {column.nulls:,}", f"distinct {column.distinct:,}"]
+        if column.total is not None:
+            facts.append(f"sum {column.total}")
+        if column.minimum is not None:
+            facts.append(f"min {column.minimum}")
+        if column.maximum is not None:
+            facts.append(f"max {column.maximum}")
+        lines.append(f"  {column.name:<{width}}  {'  '.join(facts)}")
+        if column.values:
+            shown = "  ".join(f"{value}({count:,})" for value, count in column.values[:8])
+            more = " …" if len(column.values) > 8 else ""
+            lines.append(f"  {'':<{width}}  values: {shown}{more}")
+    if not profile.columns:
+        lines.append("  no columns")
+    return "\n".join(lines)
 
 
 def _render_inspection(payload: dict[str, object]) -> str:
@@ -382,6 +477,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if verb == "inspect":
         return _inspect(args)
+
+    if verb == "profile":
+        return _profile(args)
 
     if verb == "serve":
         if args.print_config:

@@ -21,7 +21,7 @@ import anyio
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
-from semantiql.adapters.base import Adapter, AdapterError, Column
+from semantiql.adapters.base import Adapter, AdapterError, Column, RelationProfile
 from semantiql.adapters.duckdb import DuckDBAdapter
 from semantiql.knowledge.model import SemanticModel
 from semantiql.server import INSTRUCTIONS, Entity, build_server
@@ -180,6 +180,9 @@ def test_describe_model_never_touches_the_datasource(model: SemanticModel) -> No
         def columns(self, source: str) -> list[Column]:  # pragma: no cover
             raise AssertionError("describe_model read the schema")
 
+        def profile(self, source: str) -> RelationProfile:  # pragma: no cover
+            raise AssertionError("describe_model profiled the datasource")
+
         def execute(self, sql: str) -> Any:  # pragma: no cover
             raise AssertionError("describe_model reached the database")
 
@@ -275,6 +278,9 @@ def test_an_adapter_failure_is_a_failed_call_not_a_refusal(model: SemanticModel)
 
         def tables(self) -> list[str]:  # pragma: no cover
             return []
+
+        def profile(self, source: str) -> RelationProfile:  # pragma: no cover
+            raise AssertionError("the server profiled the datasource")
 
         def columns(self, source: str) -> list[Column]:  # pragma: no cover
             return []
@@ -389,6 +395,9 @@ def test_serve_releases_the_adapter_even_when_the_loop_fails(model: SemanticMode
             raise AssertionError
 
         def columns(self, source: str) -> list[Column]:  # pragma: no cover - never reached
+            raise AssertionError
+
+        def profile(self, source: str) -> RelationProfile:  # pragma: no cover - never reached
             raise AssertionError
 
         def execute(self, sql: str) -> Any:  # pragma: no cover - never reached

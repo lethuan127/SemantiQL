@@ -176,6 +176,26 @@ the actual work.
 matter. Do not model everything you found; the user knows which tables the business actually asks
 about, and you do not.
 
+**2b. Look at what is actually in the columns.**
+
+```bash
+uv run --project "$SEMANTIQL_HOME" semantiql profile --table orders --json
+```
+
+`profile` reads the rows and reports, per column: nulls, distinct count, min/max, the **sum** of a
+numeric column, and the **value distribution** of any low-cardinality column. `inspect` tells you a
+column exists; this tells you what is in it.
+
+Two things it gives you that types never will:
+
+- **Which of five money columns is worth what.** On a real dataset `fare_amount` summed to $53.9M and
+  `total_amount` to $79.5M. That is the difference between two defensible definitions of revenue, and
+  quoting it is what lets a non-technical analyst actually answer step 3's first question.
+- **Which numeric columns are secretly categories.** `payment_type` is `bigint` on every engine and a
+  category in truth. `profile` shows `1(2,319,046) 2(439,191) 0(140,162)` — six values, so it is a
+  code, and a model that groups by it produces a chart labelled 1, 2, 3 unless you do something about
+  it.
+
 **3. Ask the questions a schema cannot answer.** This is the part that needs the human, and it is
 the reason this is a conversation rather than a command:
 
@@ -219,6 +239,19 @@ rejects will produce refusals in chat that read like a broken product.
 their working tree, and the whole point is that the definitions are theirs.
 
 ### Limits on this, and they are not negotiable
+
+**Never run SQL against the database yourself.** Not `psql`, not the `duckdb` CLI, not a Python
+client, not a query through any other tool. Everything you need is `inspect` (what exists), `profile`
+(what is in it) and `doctor` (whether the model matches). Those go through SemantiQL, which means the
+figures you quote to a human came from a path someone reviewed — and a number that decides what
+"revenue" means is exactly the number that must not come from improvised SQL. This is not a style
+preference: a run once read every figure it presented with twelve raw `psql` calls, and the numbers
+were right by luck rather than by construction.
+
+**Never write to the database.** No `CREATE`, no `INSERT`, no `UPDATE`, no DDL of any kind. If the
+model needs a database object — a view to label a coded column, or to expose a join the engine
+refuses — **print the SQL and ask the analyst to run it**. It is their database, the object outlives
+the conversation, and something the model depends on should be created deliberately by its owner.
 
 **Never invent a measure's aggregation or a metric's formula.** If you cannot get an answer, leave
 it out and say what is missing. A model with three measures the user chose is worth more than ten

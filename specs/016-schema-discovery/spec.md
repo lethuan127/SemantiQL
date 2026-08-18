@@ -157,6 +157,13 @@ model mid-question to answer one; that stays refused.[^constitution]
   wrong answer this project refuses.
 - **Row-level profiling** — distinct counts, ranges, sample values. Useful for naming, and it reads
   rows, which is a bigger claim than metadata.
+
+  **Reversed by spec 020, and how it was reversed is the lesson.** This exclusion lived only here.
+  The skill never carried it, so when a run needed numbers to price a judgement question it reached
+  for raw `psql` — twelve calls, including a join and a `CREATE OR REPLACE VIEW`. It got the right
+  figures by luck rather than by construction. **An exclusion that is not in the skill is not an
+  exclusion**, and the correct answer turned out not to be a firmer prohibition but a sanctioned
+  path: `semantiql profile`, plus a rule against raw SQL that has a test.
 - **Relationship or join inference.** One table per query; a view is the escape hatch.
 
 [^constitution]: `.specify/memory/constitution.md` — the ≤15-minute setup rule, N1, N2, N4, N5, N6, and the trust-boundary list.

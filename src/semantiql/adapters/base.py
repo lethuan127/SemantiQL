@@ -60,6 +60,47 @@ class Column:
     """
 
 
+#: Above this many distinct values a column is reported without a value distribution. A constant
+#: rather than a flag: the consumer is a model, and output that depends on how the command was
+#: invoked is output it cannot reason about across two calls.
+CATEGORICAL_AT_MOST = 25
+
+
+@dataclass(frozen=True)
+class ColumnProfile:
+    """What is actually *in* a column, as opposed to what type it has.
+
+    Types cannot answer the questions that decide a semantic model. `payment_type` is `bigint` on
+    every engine and a category in truth; `fare_amount` and `total_amount` are both `double` and
+    differ by twenty-five million dollars. So a definition decision needs the numbers, and the
+    numbers used to come from whatever SQL an agent improvised (spec 020).
+    """
+
+    name: str
+    nulls: int
+    distinct: int
+    minimum: object | None = None
+    maximum: object | None = None
+    total: object | None = None
+    """The sum, for a numeric column. This is the field that prices a revenue question."""
+    values: tuple[tuple[object, int], ...] | None = None
+    """Value and row count, most frequent first — present only when `distinct` is at or below
+    `CATEGORICAL_AT_MOST`.
+
+    Cardinality is the only signal that finds a coded column, because type never will. A model built
+    without it groups by `payment_type` and produces a chart labelled 1, 2, 3.
+    """
+
+
+@dataclass(frozen=True)
+class RelationProfile:
+    """A relation's row count and a profile per column."""
+
+    source: str
+    rows: int
+    columns: tuple[ColumnProfile, ...]
+
+
 @runtime_checkable
 class Adapter(Protocol):
     """What SemantiQL needs from a datasource."""
@@ -92,10 +133,19 @@ class Adapter(Protocol):
         a Protocol that an outside adapter has to satisfy should ask for the least that does the
         job; `semantiql inspect` can present more without the seam growing.
 
-        **This is the third time this Protocol has grown** — `close()` (spec 010),
-        `carries_timezone` (011), now `tables()` (016). Each was found by building a real consumer
-        against it, which is the seam doing its job. But three is a pattern: a fourth should prompt
-        asking whether this is still the right shape, rather than adding a fifth.
+        **This Protocol has now grown four times** — `close()` (spec 010), `carries_timezone`
+        (011), `tables()` (016), `profile()` (020). Each was found by building a real consumer
+        against it, which is the seam doing its job.
+
+        The note here used to say a fourth widening should prompt asking whether this is still the
+        right shape. It did, and the answer is written up in spec 020's plan:
+        six members now serve three unrelated concerns — query (`relation`, `execute`),
+        introspection
+        (`tables`, `columns`, `profile`), and lifecycle (`close`) — and splitting introspection into
+        its own Protocol would make later growth legible as "the introspection surface grew" rather
+        than "the adapter grew again". That refactor is deliberately not bundled with the change
+        that
+        noticed it; it needs its own review, because this file is a trust boundary.
         """
         ...
 
@@ -109,6 +159,36 @@ class Adapter(Protocol):
 
         Classifies each column into `ColumnKind`. An adapter that cannot map one of its types
         returns `other`.
+        """
+        ...
+
+    def profile(self, source: str) -> RelationProfile:
+        """Report what is in `source` — row count, nulls, distinct counts, ranges, sums, and the
+        value distribution of any low-cardinality column.
+
+        **Reads rows, which `columns()` deliberately does not.** That is the point: the questions a
+        semantic model turns on cannot be answered from types. Which of five money columns is
+        revenue is a business decision, and an analyst can only make it when told the choice is
+        worth
+        twenty-five million dollars.
+
+        Like `columns()`, the SQL is **authored here and built from `relation()`** — never accepted
+        from a caller, and never handed to `execute()` as a string assembled elsewhere. That is what
+        keeps this from being a second way to query: there is no route by which caller SQL arrives.
+        The aggregates are a fixed template chosen by `ColumnKind`, so the surface cannot be widened
+        by passing a cleverer argument.
+
+        It lives on the adapter because aggregate SQL is where dialects genuinely diverge —
+        `FILTER (WHERE …)`, exact-sum casts, identifier quoting — and N4 makes that translation the
+        adapter's job.
+
+        `SELECT` only (N5).
+
+        Added by spec 020, after a discovery run read every figure it showed an analyst with **raw
+        `psql`**: twelve calls including a join and a `CREATE OR REPLACE VIEW`. Spec 016 had
+        excluded
+        row profiling, but the exclusion lived in a spec rather than in the skill, and an exclusion
+        nothing enforces is a suggestion.
         """
         ...
 
