@@ -499,6 +499,55 @@ def _suggest(name: str, candidates: list[str]) -> list[str]:
     return [folded[h] for h in hits]
 
 
+def _ordering_grain(
+    target: exp.Expr, grains: dict[tuple[str, str], str], outputs: dict[str, str]
+) -> str | Refusal:
+    """The output column a `DATE_TRUNC` in ORDER BY refers to, or why it refers to nothing.
+
+    `_grain` **raises** `SemanticSyntaxError` rather than returning a refusal, and it was until now
+    only called from `_projections`, which runs inside the `try` that converts those raises. This
+    runs outside it, so the call is guarded here: an unhandled exception on the query path is
+    neither an answer nor a stated reason, which leaves the one outcome this engine cannot have.
+    """
+    try:
+        dimension, grain = _grain(target)
+    except SemanticSyntaxError as exc:
+        return Refusal(str(exc))
+
+    if (dimension, grain) in grains:
+        return grains[(dimension, grain)]
+
+    selected = {name: g for (name, g) in grains if name == dimension}
+    if selected:
+        others = ", ".join(sorted(selected.values()))
+        return Refusal(
+            f"this request selects {dimension} by {others}, not by {grain}, so ordering by "
+            f"{grain} would arrange the rows by a boundary the answer does not show. "
+            + _orderable(outputs)
+        )
+    return Refusal(
+        f"ORDER BY DATE_TRUNC('{grain}', {dimension}) needs this request to select that same "
+        f"grain, and it does not. Add it to the SELECT list, or " + _orderable(outputs).lower()
+    )
+
+
+def _orderable(outputs: dict[str, str]) -> str:
+    """The sentence that makes an ORDER BY refusal repairable.
+
+    Every branch below ends with this, and that is the point rather than tidiness. The function
+    branch used to end at *"is not one."* — true, and unrepairable: a caller could only read it as
+    "ordering by an expression is not supported". One did. Building a model over 2.96M real taxi
+    trips, it wrote `ORDER BY DATE_TRUNC('month', pickup_datetime)`, read that message, and told the
+    analyst monthly reports come back unsorted and to sort them by hand. The alias
+    `pickup_datetime_month` would have worked.
+
+    `AGENTS.md` requires a refusal to carry the reason "that lets Claude repair its own query", so a
+    message naming only what is disallowed misses the whole purpose of refusing rather than guessing
+    (spec 019). Keeping the sentence in one helper is what stops a fourth branch being added silent.
+    """
+    return f"Order by one of: {', '.join(sorted(set(outputs.values())))}."
+
+
 def _ordering(order: exp.Order, projections: list[Projection]) -> tuple[OrderKey, ...] | Refusal:
     """Resolve `ORDER BY` against what the request selects.
 
@@ -506,10 +555,18 @@ def _ordering(order: exp.Order, projections: list[Projection]) -> tuple[OrderKey
     a number that decides the order of the rows without appearing in them leaves a reader
     unable to see why the answer is arranged as it is. That rule also disposes of ordinals and
     aggregates without needing a case for either — neither is a name the request selects.
+
+    A `DATE_TRUNC` in ORDER BY is resolved against the select list rather than refused, because
+    repeating the projection's expression is ordinary SQL and is what a model writes unprompted. It
+    resolves to the projection's **output column**, so the SQL reaching the database is
+    byte-identical to the alias spelling's and `compile.py` knows nothing about it (spec 019).
     """
     #: Both spellings resolve to the column the caller will see: `revenue AS total` can be
     #: ordered by either `revenue` or `total`.
     outputs = {p.output: p.output for p in projections} | {p.entity: p.output for p in projections}
+    #: The same lookup for grains. `Projection` already records one, so this is a second view of
+    #: the select list rather than new state.
+    grains = {(p.entity, p.grain): p.output for p in projections if p.grain}
 
     keys: list[OrderKey] = []
     for item in order.expressions:
@@ -524,12 +581,24 @@ def _ordering(order: exp.Order, projections: list[Projection]) -> tuple[OrderKey
         if isinstance(target, exp.Literal):
             return Refusal(
                 "ORDER BY takes the name of something this request selects, not a position. "
-                f"Order by one of: {', '.join(sorted(set(outputs.values())))}."
+                + _orderable(outputs)
             )
+        if isinstance(target, exp.TimestampTrunc | exp.DateTrunc):
+            resolved = _ordering_grain(target, grains, outputs)
+            if isinstance(resolved, Refusal):
+                return resolved
+            keys.append(
+                OrderKey(
+                    output=resolved,
+                    desc=bool(item.args.get("desc")),
+                    nulls_first=bool(item.args.get("nulls_first")),
+                )
+            )
+            continue
         if not isinstance(target, exp.Column):
             return Refusal(
                 f"ORDER BY takes the name of something this request selects, and "
-                f"{_predicate_label(target)} is not one."
+                f"{_predicate_label(target)} is not one. " + _orderable(outputs)
             )
         if target.name not in outputs:
             return Refusal(
