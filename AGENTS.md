@@ -113,6 +113,13 @@ the merge is refused naming the files — a table defined twice, `datasource` de
 at all, a file contributing nothing — because last-one-wins across files is the same silent
 redefinition the duplicate-key check refuses within one.
 
+The model is written by **Claude, reviewed by a human** — not by a wizard and not usually by hand.
+`semantiql inspect` reads a datasource's catalogue with no model required, and the skill drives it:
+inspect, ask the analyst what a schema cannot say, write one YAML per table, loop on `doctor`
+(spec 016). Two limits are in the skill and tested for drift: **never invent a measure's
+aggregation or a metric's formula**, and **never change a model to answer a question** — the
+second is N6, since editing a definition mid-answer is exactly the unreviewed change it forbids.
+
 **N4 — One canonical dialect, then transpile.** Adding a datasource is one new module under
 `adapters/` satisfying `adapters/base.py`, with **no change to `engine/`**. Verify with:
 
@@ -224,7 +231,8 @@ Documentation-only work and mechanical fixes are deliberately outside that lifec
 
 ## Not yet built
 
-So you don't propose these as bugs: schema introspection (`semantiql init`), the accuracy
+So you don't propose these as bugs: the `semantiql init` wizard (`inspect` reads a
+catalogue as of spec 016, but nothing writes a model non-interactively), the accuracy
 benchmark, the self-improvement loop, and the Data Governance layer (layer 3 — named in the code
 map, deliberately unimplemented).
 

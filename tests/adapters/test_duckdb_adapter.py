@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import duckdb
 import pytest
 
 from semantiql.adapters.base import Adapter
@@ -94,3 +97,70 @@ def test_an_array_of_timestamps_carries_no_timezone() -> None:
     assert DuckDBAdapter._carries_timezone("TIMESTAMPTZ[]") is False
     assert DuckDBAdapter._carries_timezone("TIMESTAMP WITH TIME ZONE[]") is False
     assert DuckDBAdapter._carries_timezone("TIMESTAMPTZ") is True
+
+
+# --- Enumeration (spec 016). Discovery cannot start without it.
+
+
+def test_tables_lists_tables_and_views(tmp_path: Path) -> None:
+    """Views are included, and that is deliberate.
+
+    A view is the documented way to model a join, so a modeller discovering a database is *more*
+    likely to want the views than the base tables. Omitting them would hide the useful half.
+    """
+    database = tmp_path / "w.duckdb"
+    setup = duckdb.connect(str(database))
+    setup.execute("CREATE TABLE orders (id INT); CREATE VIEW orders_v AS SELECT * FROM orders")
+    setup.close()
+
+    adapter = DuckDBAdapter(str(database))
+    try:
+        assert adapter.tables() == ["orders", "orders_v"]
+    finally:
+        adapter.close()
+
+
+def test_a_relation_outside_the_default_schema_is_qualified(tmp_path: Path) -> None:
+    """`main` needs no prefix; anything else does, or the name is ambiguous in a model."""
+    database = tmp_path / "w.duckdb"
+    setup = duckdb.connect(str(database))
+    setup.execute("CREATE SCHEMA staging; CREATE TABLE staging.raw (a INT); CREATE TABLE t (a INT)")
+    setup.close()
+
+    adapter = DuckDBAdapter(str(database))
+    try:
+        assert adapter.tables() == ["staging.raw", "t"]
+    finally:
+        adapter.close()
+
+
+def test_every_enumerated_name_can_be_described(tmp_path: Path) -> None:
+    """The property that makes discovery compose: a listed name is a name `columns()` accepts.
+
+    If enumeration returned something `columns()` could not take, discovery would produce a model
+    whose `source:` values do not resolve — and the failure would land on the user, not here.
+    """
+    database = tmp_path / "w.duckdb"
+    setup = duckdb.connect(str(database))
+    setup.execute("CREATE SCHEMA s; CREATE TABLE s.a (x INT); CREATE TABLE b (y VARCHAR)")
+    setup.close()
+
+    adapter = DuckDBAdapter(str(database))
+    try:
+        for name in adapter.tables():
+            assert adapter.columns(name), f"{name} was listed but cannot be described"
+    finally:
+        adapter.close()
+
+
+def test_an_in_memory_connection_reading_files_lists_nothing() -> None:
+    """A `read_csv_auto` source is not a catalogue object, so there is nothing to enumerate.
+
+    Correct, and it looks like a bug — which is why the CLI explains it rather than printing an
+    empty list. Pinned here so nobody "fixes" enumeration to invent entries for file reads.
+    """
+    adapter = DuckDBAdapter()
+    try:
+        assert adapter.tables() == []
+    finally:
+        adapter.close()

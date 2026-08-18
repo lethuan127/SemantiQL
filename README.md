@@ -73,8 +73,13 @@ query or tells the user, rather than inventing a number. Two read-only tools; th
 enforcement boundary.
 
 **Using it on your own database?** [docs/10-adopting-semantiql.md](docs/10-adopting-semantiql.md)
-walks the whole path — read-only account, modelling one table, the `doctor` loop that stands in
-for the not-yet-built wizard, and what is refused and why.
+walks the whole path — read-only account, modelling one table, the `doctor` loop, and what is
+refused and why.
+
+You do not write the first model from a blank file. `semantiql inspect` reads your catalogue
+without needing a model, and the skill has Claude use it: read the schema, ask you the handful of
+questions a schema cannot answer, write one YAML per table, then loop on `doctor` until it passes.
+[docs/03-setup-workflow.md §A3](docs/03-setup-workflow.md) is that loop, step by step.
 
 ### Against Postgres
 
@@ -142,7 +147,8 @@ LLMs answering questions over raw SQL schemas are wrong most of the time (~16% a
 - **One YAML file is the source of truth.** The semantic model is reviewable, diffable, and lives in git. It is database-agnostic — switch databases without rewriting the model.
 - **Validation over generation.** Every query is checked against the semantic model before it runs. A silently wrong number is the worst failure mode, so the engine blocks what it cannot verify.
 - **Self-improving, safely.** Confirmed question–query pairs become verified examples (few-shot/RAG) that improve accuracy over time — without ever touching metric definitions. Schema changes are only ever proposed as diffs for a human to review.
-- **Built for non-technical users.** The MVP integrates with Claude as an MCP server: an analyst sets it up once (`uvx semantiql init`, ≤15 minutes), end users just chat.
+- **Mechanical work is automated; judgement is asked about.** Claude reads your schema with `semantiql inspect` and writes the model YAML itself. Which aggregation counts as revenue, and what a row *is*, come from the analyst — Claude asks rather than picking.
+- **Built for non-technical users.** The MVP integrates with Claude as an MCP server: an analyst sets it up once (≤15 minutes), end users just chat.
 
 ## Roadmap
 

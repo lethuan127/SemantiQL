@@ -144,6 +144,96 @@ def _datasource_given(argv: list[str] | None) -> bool:
     return any(a == "--datasource" or a.startswith("--datasource=") for a in argv)
 
 
+def _inspect(args: argparse.Namespace) -> int:
+    """Report what is in the datasource. The one command that needs no semantic model.
+
+    That is the point rather than an accident: this is what runs *before* a model exists, so that
+    Claude — or a person — can see the real tables and columns and write one. Everything else in
+    this CLI takes a model and checks a claim about it; this takes a database and makes no claims.
+
+    Two steps by design (spec 016, FR-7). Naming no table lists the relations; naming one reports
+    its columns. A five-hundred-table warehouse must not arrive in a single reply, and the columns
+    of five hundred tables certainly must not.
+
+    It reads the catalogue and never a row, so it is further from the data than any other verb —
+    and on Postgres it sees exactly what the connected role is permitted to see, which means a
+    read-only account with narrow grants produces a correspondingly narrow list.
+    """
+    try:
+        adapter = _open_adapter(args)
+    except AdapterError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
+    try:
+        if args.table:
+            payload: dict[str, object] = {
+                "source": args.table,
+                "columns": [
+                    {
+                        "name": column.name,
+                        "native_type": column.native_type,
+                        # What to write in the model, as opposed to what the database calls it.
+                        "semantiql_type": column.kind,
+                        "carries_timezone": column.carries_timezone,
+                    }
+                    for column in adapter.columns(args.table)
+                ],
+            }
+        else:
+            payload = {"dialect": adapter.dialect, "relations": adapter.tables()}
+    except AdapterError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+    finally:
+        adapter.close()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+    print(_render_inspection(payload))
+    return 0
+
+
+def _render_inspection(payload: dict[str, object]) -> str:
+    """The human form. Claude passes `--json`; an analyst reading a terminal gets a table."""
+    if "relations" in payload:
+        relations = payload["relations"]
+        assert isinstance(relations, list)
+        if not relations:
+            # An empty catalogue almost always means a DuckDB model over CSV or Parquet files,
+            # which are reads rather than catalogue objects. Saying so beats printing nothing and
+            # letting the reader conclude the command is broken.
+            return (
+                "No relations found.\n\n"
+                "If this is DuckDB reading CSV or Parquet files directly, that is expected — a "
+                "file read is not a catalogue object, so there is nothing to list. Point "
+                "`--database` at a DuckDB file, or set a model `source:` to the file path.",
+            )[0]
+        lines = [f"{len(relations)} relation{'' if len(relations) == 1 else 's'}:"]
+        lines += [f"  {name}" for name in relations]
+        lines.append("")
+        lines.append("Next: semantiql inspect --table <name>   (add --json for machine output)")
+        return "\n".join(lines)
+
+    columns = payload["columns"]
+    assert isinstance(columns, list)
+    if not columns:
+        return f"{payload['source']} has no columns."
+    width = max(len(str(c["name"])) for c in columns)
+    native = max(len(str(c["native_type"])) for c in columns)
+    lines = [f"{payload['source']}:"]
+    for column in columns:
+        assert isinstance(column, dict)
+        zone = "  carries a timezone" if column["carries_timezone"] else ""
+        lines.append(
+            f"  {str(column['name']).ljust(width)}  "
+            f"{str(column['native_type']).ljust(native)}  "
+            f"-> type: {column['semantiql_type']}{zone}"
+        )
+    return "\n".join(lines)
+
+
 def _connector_config(args: argparse.Namespace) -> dict[str, object]:
     """The `mcpServers` block for Claude Desktop, with every path already absolute.
 
@@ -209,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         "sql",
         nargs="?",
         help="semantic SQL, e.g. 'SELECT revenue, channel FROM orders' — or a verb: "
-        "'doctor', 'serve'",
+        "'inspect', 'doctor', 'serve'",
     )
     parser.add_argument(
         "-m",
@@ -237,6 +327,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Postgres connection string, e.g. postgresql://user@host/db. Postgres only; "
         "omit it to use libpq's environment (PGHOST, PGUSER, .pgpass), which keeps a password "
         "out of your shell history",
+    )
+    parser.add_argument(
+        "--table",
+        default=None,
+        help="with 'inspect': report this relation's columns instead of listing relations",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="with 'inspect': emit JSON instead of a table, for a program to read",
     )
     parser.add_argument(
         "--print-config",
@@ -279,6 +379,9 @@ def main(argv: list[str] | None = None) -> int:
     verb = args.sql.strip().lower()
     if verb == "doctor":
         return _doctor(args.model, args)
+
+    if verb == "inspect":
+        return _inspect(args)
 
     if verb == "serve":
         if args.print_config:

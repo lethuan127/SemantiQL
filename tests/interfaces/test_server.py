@@ -174,6 +174,9 @@ def test_describe_model_never_touches_the_datasource(model: SemanticModel) -> No
         def relation(self, source: str) -> Any:  # pragma: no cover
             raise AssertionError("describe_model resolved a relation")
 
+        def tables(self) -> list[str]:  # pragma: no cover
+            raise AssertionError("describe_model enumerated the datasource")
+
         def columns(self, source: str) -> list[Column]:  # pragma: no cover
             raise AssertionError("describe_model read the schema")
 
@@ -269,6 +272,9 @@ def test_an_adapter_failure_is_a_failed_call_not_a_refusal(model: SemanticModel)
 
         def relation(self, source: str) -> Any:
             return DuckDBAdapter.relation(source)
+
+        def tables(self) -> list[str]:  # pragma: no cover
+            return []
 
         def columns(self, source: str) -> list[Column]:  # pragma: no cover
             return []
@@ -377,6 +383,9 @@ def test_serve_releases_the_adapter_even_when_the_loop_fails(model: SemanticMode
             return "duckdb"
 
         def relation(self, source: str) -> Any:  # pragma: no cover - never reached
+            raise AssertionError
+
+        def tables(self) -> list[str]:  # pragma: no cover - never reached
             raise AssertionError
 
         def columns(self, source: str) -> list[Column]:  # pragma: no cover - never reached

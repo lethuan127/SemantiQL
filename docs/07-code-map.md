@@ -18,7 +18,7 @@ src/semantiql/
     duckdb.py      DuckDB; reads CSV and Parquet directly
     postgres.py    Postgres; tables and views only, read-only connection
   doctor.py      checks a model against the database — `semantiql doctor`
-  cli.py         the `semantiql` command
+  cli.py         the `semantiql` command — query, doctor, serve, and inspect
   server.py      the MCP server — two read-only tools over stdio, `semantiql serve`
   __main__.py    lets `python -m semantiql` work, so a connector config can name an interpreter
 ```
@@ -111,6 +111,7 @@ module that looks like a feature.
 | Support a new database | one new file in `adapters/` — **and nothing else** |
 | A new CLI verb | `cli.py`, routing through `engine.run.run` |
 | A new model-versus-reality check | `doctor.py` |
+| Something Claude should see about a database before a model exists | the seam in `adapters/base.py`, then `cli.py` to display it |
 | A new tool Claude can call | `server.py` — and think hard first: those tools are the whole boundary |
 | A new check in the gate | `scripts/verify.sh` — as its own step, so its cost and any skip are visible |
 | A test that needs a database | the matching layer directory, marked `pg`, and it must **skip** when there is none |
@@ -160,6 +161,11 @@ touch the seam:
 - `close()` was missing from the `Adapter` Protocol. Both adapters had it and the CLI called
   it; nothing caught the gap because the CLI was typed against the concrete class. **One
   implementation cannot tell you a seam is incomplete.**
+- `tables()` was missing for the same reason, one spec later: nothing needed to enumerate a
+  catalogue until discovery did. **Three widenings, each found by building a real consumer** —
+  `close()` by the CLI, `carries_timezone` by time grains, `tables()` by `inspect`. The seam is
+  correct where something exercises it and unfalsified elsewhere; a new consumer is the only
+  reliable way to tell which.
 - `DATE_TRUNC` on a date column returns a timezone-aware value on Postgres and a naive one on
   DuckDB, from byte-identical SQL — Postgres picks its `timestamptz` overload. Buckets and
   totals agree, so a test pins the difference; resolving it properly means changing how
@@ -170,13 +176,14 @@ constitution names — raise it as an issue rather than working around it.
 
 ## The adapter seam in detail
 
-An adapter provides four things, and `adapters/duckdb.py` is the worked example:
+An adapter provides five things, and `adapters/duckdb.py` is the worked example:
 
 | Member | Contract |
 |---|---|
 | `dialect` | the sqlglot dialect name SQL is transpiled to before `execute` |
 | `relation(source)` | how a model's `source` becomes a selectable relation — a table name passes through, a `.csv`/`.parquet` path becomes a reader call. Returns a **built sqlglot expression, never a string**: a string would be re-parsed by the compiler, letting a quote in `source` inject relations into the FROM clause |
 | `columns(source)` | describes a model `source` as `Column(name, native_type, kind)`, building its probe through `relation()` rather than interpolating. `kind` translates the engine's own type names into the model's four, so `doctor` can compare a column to `type:` without learning any dialect's vocabulary — that translation is the adapter's job (N4). `carries_timezone` rides alongside as one bit rather than a fifth `kind`, because it matters for exactly one thing (time grains) and a fifth kind would make `doctor` report every `timestamptz` column as a filter-typing mismatch (spec 011) |
+| `tables()` | every relation a model could name, as displayed names — qualified only outside the engine's default schema (`main`, `public`), system schemas excluded, sorted by what is displayed. This is the one member that answers a question asked *before* a model exists, which is why `semantiql inspect` needs no `-m` (spec 016) |
 | `execute(sql)` | run validated SQL; return `(column names, rows)` |
 
 What the core guarantees in return: `execute` only ever receives SQL whose every identifier
