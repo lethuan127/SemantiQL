@@ -426,7 +426,9 @@ def test_without_a_declaration_the_bucket_is_at_the_servers_mercy(
     )
 
 
-def test_the_connection_does_not_sit_in_a_transaction(postgres_adapter: PostgresAdapter) -> None:
+def test_the_connection_does_not_sit_in_a_transaction(
+    postgres_adapter: PostgresAdapter, postgres_dsn: str
+) -> None:
     """After an answer, the connection is `idle` — not `idle in transaction` (spec 012).
 
     `autocommit` stays False because that is what makes `read_only` real, and the cost is that
@@ -437,13 +439,20 @@ def test_the_connection_does_not_sit_in_a_transaction(postgres_adapter: Postgres
     Nothing else in the suite would catch a regression here: the answers stay correct either
     way, and the damage is to the database rather than to the number. So the backend state is
     asserted directly.
+
+    Take the DSN from the fixture rather than from the live connection — see the comment below.
     """
     import psycopg
 
     adapter_pid = postgres_adapter._conn.info.backend_pid
     postgres_adapter.execute("SELECT 1")
 
-    observer = psycopg.connect(postgres_adapter._conn.info.dsn)
+    # The DSN from the fixture, not `postgres_adapter._conn.info.dsn`. psycopg deliberately
+    # **redacts the password** from `info.dsn`, so reconnecting with it only works against a
+    # server that needs no password — which is to say, against a `trust`-auth database like the
+    # one this was first written on, and not against the password-protected container CI runs.
+    # It passed locally and failed on every CI run for five commits.
+    observer = psycopg.connect(postgres_dsn)
     observer.autocommit = True
     try:
         row = observer.execute(

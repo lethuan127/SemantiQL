@@ -130,6 +130,12 @@ reaches this container or nothing at all. And **the gate never requires Docker**
 `SEMANTIQL_TEST_DSN` unset the `pg` step skips with a stated reason and `./scripts/verify.sh`
 still passes, because a fresh clone has to run with nothing installed.
 
+**Use the container rather than a Postgres you started by hand**, and use the DSN above with its
+password. A hand-rolled `trust`-auth database is more permissive than the one CI runs, and it hides
+a real class of bug: a test that reconnects using `conn.info.dsn` works against `trust` and fails
+against a password, because psycopg redacts the password from that string. That exact mistake
+passed locally and failed every CI run for five commits.
+
 ## What makes a pull request mergeable
 
 - **`./scripts/verify.sh` passes.** No exceptions, and please don't weaken a check to make
