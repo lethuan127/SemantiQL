@@ -13,6 +13,10 @@ documentation one.
 **What this file cannot check:** that installing the plugin actually starts the server. That needs
 a Claude client, so it is a manual step recorded in `specs/013-plugin-and-skill/validation.md`
 rather than something the gate pretends to prove.
+
+The marketplace tests below cover the gap that let the plugin sit uninstallable for four specs
+(spec 017). `claude plugin validate` checks each manifest's *shape* and the gate runs it; what it
+cannot check is whether `source: ./plugin` points at anything, so that is what these assert.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ import pytest
 
 from semantiql.engine.validate import Refusal, validate
 from semantiql.knowledge.model import SemanticModel
-from tests._support import PLUGIN  # noqa: E402
+from tests._support import PLUGIN, REPO_ROOT  # noqa: E402
 
 MANIFEST = PLUGIN / ".claude-plugin" / "plugin.json"
 MCP_CONFIG = PLUGIN / ".mcp.json"
@@ -270,3 +274,93 @@ def test_the_skill_does_not_promise_a_tool_the_server_lacks() -> None:
     assert "inspect" in text
     for invented in ("inspect_schema", "describe_datasource", "list_tables"):
         assert invented not in text, f"the skill names a tool that does not exist: {invented}"
+
+
+# --- The marketplace (spec 017): the wrapper that makes the plugin reachable at all.
+
+MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
+
+
+def _marketplace() -> dict[str, Any]:
+    return json.loads(MARKETPLACE.read_text())  # type: ignore[no-any-return]
+
+
+def test_a_marketplace_manifest_exists() -> None:
+    """Without this file the plugin cannot be installed by any route.
+
+    Claude Code installs from a *marketplace*, not from a plugin directory: `marketplace add`
+    resolves `<source>/.claude-plugin/marketplace.json` and fails outright when it is absent. The
+    plugin manifest was valid for four specs while the documented install could not be followed,
+    because every check that existed looked *inside* `plugin/` and the missing piece was outside it.
+    """
+    assert MARKETPLACE.exists(), (
+        "no marketplace manifest — `claude plugin marketplace add <checkout>` cannot succeed, "
+        "so the install documented in docs/03-setup-workflow.md A1 is unfollowable"
+    )
+
+
+def test_the_marketplace_names_the_plugin() -> None:
+    manifest = _marketplace()
+    assert manifest["name"] == "semantiql"
+    names = [entry["name"] for entry in manifest["plugins"]]
+    assert names == ["semantiql"], (
+        "one plugin, and `install semantiql@semantiql` depends on the name"
+    )
+
+
+def test_the_marketplace_source_resolves_to_the_plugin() -> None:
+    """The check `claude plugin validate` cannot make.
+
+    A schema validator confirms `source` is a string. It cannot confirm the string points at a real
+    plugin — so renaming or moving `plugin/` would leave both manifests individually valid and the
+    install broken. This is the dangling pointer, asserted.
+
+    Note the base directory: `source` resolves against the **marketplace root** — the path handed to
+    `claude plugin marketplace add` — not against the `.claude-plugin/` directory the manifest sits
+    in. The first version of this test used the manifest's own parent, failed, and was wrong: the
+    install had already succeeded, which is what settled which of the two was mistaken.
+    """
+    (entry,) = _marketplace()["plugins"]
+    target = (REPO_ROOT / entry["source"]).resolve()
+    assert target == PLUGIN.resolve(), f"source points at {target}, not at {PLUGIN}"
+
+    inner = json.loads((target / ".claude-plugin" / "plugin.json").read_text())
+    assert inner["name"] == entry["name"], (
+        "the marketplace entry and the plugin manifest disagree about the plugin's name, so "
+        "`install semantiql@semantiql` would resolve to something that calls itself otherwise"
+    )
+
+
+def test_the_two_descriptions_agree() -> None:
+    """Duplicated on purpose, so pinned on purpose.
+
+    Unlike the version — which lives only in `plugin.json` precisely so it cannot disagree — the
+    description has to appear in the marketplace entry, because that is what someone browsing reads
+    before installing. Forced duplication is worth a test; drift here means two accounts of what the
+    plugin does, and the reader sees whichever one their route showed them.
+    """
+    (entry,) = _marketplace()["plugins"]
+    inner = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
+    assert entry["description"] == inner["description"]
+
+
+def test_the_marketplace_entry_carries_no_version() -> None:
+    """One version, in one file.
+
+    `plugin.json` has it. `claude plugin tag` exists specifically because a version in a plugin
+    manifest and in its marketplace entry can disagree — so the second copy is simply not written,
+    and there is nothing to keep in sync.
+    """
+    (entry,) = _marketplace()["plugins"]
+    assert "version" not in entry
+
+
+def test_the_marketplace_holds_no_absolute_path() -> None:
+    """A committed absolute path is one developer's home directory in everyone else's checkout.
+
+    The same hazard the installer creates in `.claude/settings.local.json`, which is why that file
+    is git-ignored. Here the source is relative and must stay that way.
+    """
+    assert "/Users/" not in MARKETPLACE.read_text()
+    (entry,) = _marketplace()["plugins"]
+    assert entry["source"].startswith("./")

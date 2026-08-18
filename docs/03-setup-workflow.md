@@ -32,10 +32,42 @@ uv run semantiql "SELECT revenue, channel FROM orders"
 > `semantiql doctor` and the Postgres adapter, so `uvx semantiql doctor` answers *"doctor is not
 > implemented yet"*. Install from source until a newer release is cut.
 
-**Also install [Claude Code](https://claude.com/claude-code) if you don't have it**, and add this
-checkout's `plugin/` directory. [A3](#a3-let-claude-write-the-model-from-your-real-schema) has Claude
-read your schema and write the model, which needs a Claude that can run commands and edit files —
-Claude Desktop cannot do either. Desktop is for Flow B, where questions get asked.
+**Also install [Claude Code](https://claude.com/claude-code) if you don't have it, then install this
+repository's plugin.** [A3](#a3-let-claude-write-the-model-from-your-real-schema) has Claude read your
+schema and write the model, which needs a Claude that can run commands and edit files — Claude Desktop
+cannot do either. Desktop is for Flow B, where questions get asked.
+
+Two commands, run from the checkout:
+
+```console
+$ claude plugin marketplace add "$PWD"
+✔ Successfully added marketplace: semantiql (declared in user settings)
+
+$ claude plugin install semantiql@semantiql
+✔ Successfully installed plugin: semantiql@semantiql (scope: user)
+```
+
+The first command is the one people expect not to need. Claude Code installs a plugin from a
+**marketplace** — a directory carrying `.claude-plugin/marketplace.json` that says which plugins
+exist and where — and this repository is one, listing the single plugin in `plugin/`. Pointing
+`marketplace add` straight at `plugin/` fails, because a plugin directory is not a marketplace.
+
+**Don't add `--scope local`.** It works, and it writes an absolute path to your checkout into
+`.claude/settings.local.json` — a file inside the repository. The default scope keeps everything in
+`~/.claude/` and leaves your working tree clean.
+
+Confirm both halves arrived:
+
+```console
+$ claude plugin details semantiql@semantiql
+Component inventory
+  Skills (1)  semantiql
+  MCP servers (1)  semantiql  (tool schemas resolved at runtime; not counted)
+```
+
+The skill is *how to work*; the MCP server is *what may be run*. A3 needs the skill, and B2 needs
+the server, so a listing missing either one means the rest of this document will not behave as
+written.
 
 ### A2. Create a read-only database account
 

@@ -242,8 +242,18 @@ be easier and would let the model reach the database by any route. Adding a thir
 design decision, not a convenience — and a refusal must keep travelling as a normal answer
 carrying its reason, because that reason is what lets Claude repair its own query.
 
-**`plugin/` and `bundle/` are shipped product; `.claude/` is this repo's own tooling.** Don't mix
-them. `bundle/` holds only a three-line entry point — `scripts/build_bundle.py` generates the
+**`.claude-plugin/`, `plugin/` and `bundle/` are shipped product; `.claude/` is this repo's own
+tooling.** Don't mix them — the first and the last differ by a hyphen and a word, and they are
+opposites. `.claude-plugin/marketplace.json` is what makes the plugin installable at all: Claude Code
+installs from a *marketplace*, so the two documented commands are
+
+```bash
+claude plugin marketplace add "$PWD"      # the repo root, not plugin/
+claude plugin install semantiql@semantiql
+```
+
+and pointing `marketplace add` at `plugin/` fails, which is what `docs/03-setup-workflow.md` A1 used
+to tell people to do (spec 017). `bundle/` holds only a three-line entry point — `scripts/build_bundle.py` generates the
 manifest and copies the source at build time, so there is never a second copy of the package in
 git. `dist/` is build output and ignored. And N6
 applies to `plugin/skills/semantiql/SKILL.md` as much as to code: a skill that told Claude to add

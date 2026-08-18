@@ -60,6 +60,22 @@ uv run pytest -m pg || fail "postgres differential tests"
 step "desktop bundle (scripts/build_bundle.py)"
 uv run python scripts/build_bundle.py --out "$(mktemp -d)" >/dev/null || fail "bundle build"
 
+# The shipped plugin and the marketplace that makes it installable are two static JSON files, and
+# a break in either is invisible until someone tries to install — which is how the marketplace came
+# to be missing for four specs. `--strict` because this is a gate: it fails on unrecognised fields
+# and absent metadata that the runtime would tolerate.
+#
+# Guarded on the CLI being present, because Claude Code is not a dependency of this repository and
+# CI does not have it. The skip prints its reason: a check that disappears silently reads exactly
+# like a check that passed, which is the failure mode this project exists to refuse.
+step "plugin manifests (claude plugin validate)"
+if command -v claude >/dev/null 2>&1; then
+  claude plugin validate . --strict || fail "marketplace manifest"
+  claude plugin validate ./plugin --strict || fail "plugin manifest"
+else
+  echo "skipped: no 'claude' on PATH — Claude Code is not a dependency of this repo"
+fi
+
 # The change records under specs/ are an OKF bundle; conformance errors are failures.
 # Absent Python yaml this validator degrades rather than lying, so it runs under uv too.
 if [ -f .claude/skills/okf/scripts/validate_bundle.py ] && [ -d specs ]; then
