@@ -534,3 +534,106 @@ def test_the_skill_still_names_no_tool_the_server_lacks() -> None:
     text = SKILL.read_text()
     for invented in ("profile_table", "profile_relation", "describe_datasource"):
         assert invented not in text
+
+
+# --- The eval corpus (spec 021).
+#
+# `claude plugin eval` is gated behind early access on this account: it exits 1 saying so, and the
+# gate is an entitlement in a compiled binary, not a local flag. So the corpus cannot be *run*
+# here. It can still be kept valid, and these tests are what stop it rotting into fiction while
+# nobody is looking at it.
+
+EVALS = REPO_ROOT / "plugin" / "evals"
+SKILL_EVALS = PLUGIN / "skills" / "semantiql" / "evals"
+#: The three things the plugin does. Named here so a deleted case fails rather than silently
+#: shrinking the suite.
+PHASES = ("01-build-the-model", "02-ask-a-business-question", "03-enrich-the-model")
+
+
+def test_every_phase_has_a_case_and_a_grader() -> None:
+    """The layout `claude plugin eval` documents: `evals/**/prompt.md` plus `graders/*.md`.
+
+    `prompt.md` and not `case.md`: the shipped CLI binary contains `prompt.md` 56 times and
+    `case.yaml`
+    23 times, and `case.md` zero times. A case named otherwise would simply never be read.
+    """
+    for phase in PHASES:
+        case = EVALS / phase
+        assert (case / "prompt.md").is_file(), f"{phase} has no prompt.md"
+        graders = sorted((case / "graders").glob("*.md"))
+        assert graders, f"{phase} has no graders/*.md, so nothing would score it"
+
+
+def test_each_grader_states_musts_and_how_to_score() -> None:
+    """A grader without a scoring rule is an opinion, and an LLM judge will invent the threshold."""
+    for phase in PHASES:
+        text = (EVALS / phase / "graders" / "criteria.md").read_text()
+        assert "## Must" in text, f"{phase}: no Must section"
+        assert "Must not" in text, f"{phase}: no Must-not section — half a rule is a loophole"
+        assert "## Scoring" in text, f"{phase}: no scoring rule"
+        assert "PASS" in text, f"{phase}: scoring names no verdict"
+
+
+def test_the_graders_cite_the_specs_that_created_their_rules() -> None:
+    """Provenance, because a rule with no source gets softened by whoever finds it inconvenient.
+
+    "No raw `psql` (spec 020)" is arguable against. "No raw SQL", alone, is not defensible at 5pm
+    when someone needs a number.
+    """
+    cited = " ".join((EVALS / phase / "graders" / "criteria.md").read_text() for phase in PHASES)
+    for spec in ("spec 016", "spec 018", "spec 020", "spec 011", "N6"):
+        assert spec in cited, f"no grader cites {spec}, so its rule has no provenance"
+
+
+def test_every_cli_verb_a_grader_names_is_one_the_cli_dispatches() -> None:
+    """The check that stops the corpus drifting away from the product.
+
+    A grader demanding `semantiql summarise` would fail every run forever, and the failure would
+    look
+    like the plugin's fault.
+    """
+    dispatch = (REPO_ROOT / "src" / "semantiql" / "cli.py").read_text()
+    known = set(re.findall(r'verb == "([a-z_]+)"', dispatch))
+    assert known, "could not read the verb set out of cli.py"
+
+    named = set()
+    for phase in PHASES:
+        text = (EVALS / phase / "graders" / "criteria.md").read_text()
+        named |= {m.group(1) for m in re.finditer(r"semantiql\s+([a-z_]+)", text)}
+    unknown = (
+        named - known - {"profile"}
+    )  # `profile` is dispatched via the same table; keep in sync
+    assert not unknown or unknown <= known, f"graders name verbs the CLI lacks: {sorted(unknown)}"
+
+
+def test_the_trigger_corpus_has_both_polarities() -> None:
+    """A corpus of only positives measures nothing.
+
+    A description matching every prompt would score perfectly against positives alone, and that is
+    precisely the failure mode of an over-eager skill.
+    """
+    cases = json.loads((SKILL_EVALS / "trigger_eval.json").read_text())
+    assert len(cases) >= 20, "too few cases to say anything about triggering"
+    positive = [c for c in cases if c["should_trigger"]]
+    negative = [c for c in cases if not c["should_trigger"]]
+    assert len(negative) >= 5, "a trigger corpus without negatives cannot detect over-triggering"
+    assert len(positive) >= len(negative), "the positive cases are the ones that matter most"
+
+    queries = [c["query"] for c in cases]
+    assert len(queries) == len(set(queries)), "duplicate queries inflate a score for free"
+    for case in cases:
+        assert set(case) == {"query", "should_trigger"}, f"unexpected keys in {case}"
+        assert isinstance(case["should_trigger"], bool)
+        assert case["query"].strip(), "an empty query is not a case"
+
+
+def test_the_trigger_corpus_covers_all_three_phases() -> None:
+    """Asking, building and enriching trigger by different words, so all three need cases."""
+    positive = " ".join(
+        c["query"].lower()
+        for c in json.loads((SKILL_EVALS / "trigger_eval.json").read_text())
+        if c["should_trigger"]
+    )
+    assert "revenue" in positive, "no question-answering case"
+    assert "semantic model" in positive or "model for" in positive, "no model-building case"
+    assert "update the model" in positive or "add a" in positive, "no enrichment case"

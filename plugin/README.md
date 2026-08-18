@@ -94,6 +94,13 @@ That prints the `mcpServers` JSON with every path already absolute, to paste int
 carries the essential guidance in its own instructions so it remains usable without it.
 
 
+## Behavioural evals
+
+[`evals/`](../plugin/evals/README.md) holds three cases — build a model, answer from it, enrich it —
+in the layout `claude plugin eval` reads. That command is gated behind early access, so the suite is
+authored and kept valid rather than run; the corpus states what correct behaviour is, and
+`tests/interfaces/test_plugin.py` stops it rotting.
+
 ## Scoring the skill
 
 [PluginEval](https://github.com/wshobson/agents) (MIT) scores the skill on ten dimensions across two

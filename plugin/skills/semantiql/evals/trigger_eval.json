@@ -1,0 +1,36 @@
+[
+  {"query": "What was revenue by channel last quarter?", "should_trigger": true},
+  {"query": "How many orders did we get in July?", "should_trigger": true},
+  {"query": "Show me the monthly revenue trend for this year", "should_trigger": true},
+  {"query": "Which sales channel has the highest average order value?", "should_trigger": true},
+  {"query": "How many distinct customers bought something last month?", "should_trigger": true},
+  {"query": "Total sales by country please", "should_trigger": true},
+  {"query": "Why was my last query refused? It said HAVING is not supported", "should_trigger": true},
+  {"query": "SemantiQL refused my question about profit margin — can you fix the query?", "should_trigger": true},
+  {"query": "How much of last year's sales were returns?", "should_trigger": true},
+
+  {"query": "Build me a semantic model for the Postgres database in my environment", "should_trigger": true},
+  {"query": "I have a new warehouse table, can you add it to the semantic model?", "should_trigger": true},
+  {"query": "Create a SemantiQL model for ./shop.duckdb", "should_trigger": true},
+  {"query": "What columns are in the invoice_lines table, and which of them look like money?", "should_trigger": true},
+  {"query": "doctor is failing on my model, help me fix it", "should_trigger": true},
+  {"query": "Which of these amount columns should sales be?", "should_trigger": true},
+  {"query": "invoice_date has no timezone — what should I put in the model?", "should_trigger": true},
+
+  {"query": "From now on sales should be net of returns. Update the model.", "should_trigger": true},
+  {"query": "Add a customer_segment dimension to the orders table", "should_trigger": true},
+  {"query": "The revenue measure description is wrong, it does include tax", "should_trigger": true},
+  {"query": "Can you enrich the model with labels so charts stop showing payment_type as 1 and 2?", "should_trigger": true},
+  {"query": "We need a metric for revenue per order", "should_trigger": true},
+
+  {"query": "Write a Python function that reverses a linked list", "should_trigger": false},
+  {"query": "What's the weather in Hanoi tomorrow?", "should_trigger": false},
+  {"query": "Rebase my branch onto main and fix the conflicts", "should_trigger": false},
+  {"query": "Explain the difference between a LEFT JOIN and an INNER JOIN", "should_trigger": false},
+  {"query": "Set up a GitHub Actions workflow to run my tests", "should_trigger": false},
+  {"query": "Summarise this PDF for me", "should_trigger": false},
+  {"query": "My Postgres server won't start, the log says could not bind to port", "should_trigger": false},
+  {"query": "Refactor this React component to use hooks", "should_trigger": false},
+  {"query": "What does the CAP theorem say?", "should_trigger": false},
+  {"query": "Install pandas in my virtualenv", "should_trigger": false}
+]
