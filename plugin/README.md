@@ -92,3 +92,42 @@ uv run semantiql serve -m /path/to/model.yml --print-config
 That prints the `mcpServers` JSON with every path already absolute, to paste into
 `claude_desktop_config.json`. The server is identical; only the skill is missing, and the server
 carries the essential guidance in its own instructions so it remains usable without it.
+
+
+## Scoring the skill
+
+[PluginEval](https://github.com/wshobson/agents) (MIT) scores a skill on ten dimensions. It is a
+**developer tool, not a gate**: it needs a third-party plugin installed and makes LLM calls, so it
+stays out of `scripts/verify.sh` and out of CI.
+
+```bash
+claude plugin marketplace add wshobson/agents
+claude plugin install plugin-eval@claude-code-workflows
+
+P=~/.claude/plugins/cache/claude-code-workflows/plugin-eval/0.1.1
+cd "$P" && uv run --extra llm plugin-eval score \
+  /path/to/semantiql/plugin/skills/semantiql --depth standard
+```
+
+**Result as of spec 020: 73.0/100, Silver, and no anti-patterns detected** at either the static or
+judge layer. Token efficiency scored 0.962 (A) and triggering accuracy 0.801 (B-) under the LLM judge.
+
+### Four dimensions we deliberately do not chase
+
+The remaining gap is mostly convention-scoring, and closing it would mean gaming a regex rather than
+improving the skill. Recorded here so it is a decision rather than an oversight, and so nobody
+re-litigates it from the number alone. Read from the tool's own source, not inferred:
+
+| Dimension | What it actually rewards | Why we leave it |
+|---|---|---|
+| Progressive disclosure 0.60 | 281 lines is inside its **ideal** 200–600 band, which caps at 0.60; the rest needs `references/` and `assets/` directories | We would be adding directories we have no content for |
+| Ecosystem coherence 0.50 | baseline 0.50, +0.25 for cross-references to other skills, +0.25 for containing "related" / "see also" / "companion" | The plugin ships one skill. It is standalone, and the phrase is a regex match, not a fact |
+| Frontmatter, name portion | +0.15 only when the skill's `name` **differs** from its directory | They match, which is the convention everywhere else |
+| Frontmatter, "pushiness" | the literal words "proactively", "automatically", "always use"; and ≥3 comma-separated "when …ing" clauses | Keyword stuffing. It changes whether a regex fires, not whether the skill does |
+
+`AGENTS.md` forbids weakening a check to make it pass. Inflating a metric without improving the thing
+it measures is the same trade in the other direction, so the number stays at 73.
+
+**The one signal worth returning to** is Output Quality, which the LLM judge scored 0.620 (D-). Unlike
+the four above, that is a judgement about the skill's substance rather than its shape — but the tool
+reports no reason, so acting on it needs the judge's transcript, which `--depth deep` may expose.
