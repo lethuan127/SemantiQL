@@ -28,7 +28,14 @@ import psycopg
 from psycopg import postgres as pg_catalog
 from sqlglot import exp
 
-from semantiql.adapters.base import AdapterError, Column, ColumnKind
+from semantiql.adapters.base import (
+    CATEGORICAL_AT_MOST,
+    AdapterError,
+    Column,
+    ColumnKind,
+    ColumnProfile,
+    RelationProfile,
+)
 
 #: Sources this adapter cannot honour. DuckDB reads these paths directly; Postgres has no
 #: notion of a file source at all, so passing one through as a table name would surface as
@@ -211,6 +218,106 @@ class PostgresAdapter:
         except psycopg.Error as exc:
             self._conn.rollback()
             raise AdapterError(f"could not read {source!r}: {exc}") from exc
+
+    def profile(self, source: str) -> RelationProfile:
+        """One wide aggregate pass, then a grouped query per low-cardinality column.
+
+        Two Postgres specifics. Each value is cast to `numeric` **before** summing, not after: on
+        the
+        real taxi table `sum(fare_amount)::numeric` gives `53882224.7599785` while
+        `sum(fare_amount::numeric)` gives `53882224.76`. The first version of this cast was in the
+        wrong place and the drift is what caught it. A figure that decides what revenue *means*
+        should
+        not carry float noise; being out by cents is survivable, but printing noise next to a
+        business
+        definition invites the reader to distrust the number that matters.
+
+        And the transaction is rolled back after fetching, exactly as `execute` does: `autocommit`
+        is
+        off because that is what makes `read_only` real (spec 010), which leaves the connection
+        `idle in transaction` holding a snapshot open until something ends it.
+        """
+        described = self.columns(source)
+        if not described:
+            return RelationProfile(source=source, rows=0, columns=())
+
+        relation = self.relation(source)
+        selects: list[exp.Expr] = [exp.func("count", exp.Star())]
+        for column in described:
+            reference = exp.column(column.name)
+            selects.append(exp.func("count", reference))
+            selects.append(exp.Count(this=exp.Distinct(expressions=[reference])))
+            if column.kind == "date":
+                # Text, for the same reason as DuckDB: a bound is a report, and it keeps psycopg's
+                # own conversion out of it. Still the session's timezone for a tz-carrying column.
+                selects.append(exp.cast(exp.func("min", reference), "TEXT"))
+                selects.append(exp.cast(exp.func("max", reference), "TEXT"))
+            elif column.kind == "number":
+                selects.append(exp.func("min", reference))
+                selects.append(exp.func("max", reference))
+                selects.append(exp.func("sum", exp.cast(reference, "NUMERIC")))
+
+        wide = exp.select(*selects).from_(relation).sql(dialect="postgres")
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(wide)
+                row = cur.fetchone() or ()
+        except psycopg.Error as exc:
+            self._conn.rollback()
+            raise AdapterError(f"could not profile {source!r}: {exc}") from exc
+
+        rows = int(row[0] or 0)
+        profiles: list[ColumnProfile] = []
+        cursor = 1
+        for column in described:
+            non_null = int(row[cursor] or 0)
+            distinct = int(row[cursor + 1] or 0)
+            cursor += 2
+            minimum = maximum = total = None
+            if column.kind == "date":
+                minimum, maximum = row[cursor], row[cursor + 1]
+                cursor += 2
+            elif column.kind == "number":
+                minimum, maximum, total = row[cursor], row[cursor + 1], row[cursor + 2]
+                cursor += 3
+            profiles.append(
+                ColumnProfile(
+                    name=column.name,
+                    nulls=rows - non_null,
+                    distinct=distinct,
+                    minimum=minimum,
+                    maximum=maximum,
+                    total=total,
+                    values=self._distribution(relation, column.name, column.kind == "date")
+                    if 0 < distinct <= CATEGORICAL_AT_MOST
+                    else None,
+                )
+            )
+        self._conn.rollback()
+        return RelationProfile(source=source, rows=rows, columns=tuple(profiles))
+
+    def _distribution(
+        self, relation: exp.Expr, column: str, as_text: bool = False
+    ) -> tuple[tuple[object, int], ...]:
+        """Value and row count, most frequent first. Bounded by the caller's cardinality check."""
+        grouped: exp.Expr = exp.column(column)
+        shown: exp.Expr = exp.cast(grouped, "TEXT") if as_text else grouped
+        counted = exp.func("count", exp.Star())
+        sql = (
+            exp.select(shown, counted)
+            .from_(relation)
+            .group_by(grouped)
+            .order_by(exp.Ordered(this=counted, desc=True))
+            .limit(CATEGORICAL_AT_MOST)
+            .sql(dialect="postgres")
+        )
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(sql)
+                return tuple((value, int(count)) for value, count in cur.fetchall())
+        except psycopg.Error as exc:
+            self._conn.rollback()
+            raise AdapterError(f"could not profile {column!r}: {exc}") from exc
 
     def execute(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
         try:

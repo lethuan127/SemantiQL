@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from sqlglot import exp
 
-from semantiql.adapters.base import Column
+from semantiql.adapters.base import Column, RelationProfile
 from semantiql.engine.run import run
 from semantiql.engine.validate import _CLAUSE_LABELS, Refusal, ValidRequest, validate
 from semantiql.knowledge.loader import load_model
@@ -38,6 +38,9 @@ class ExplodingAdapter:
 
     def columns(self, source: str) -> list[Column]:  # pragma: no cover
         raise AssertionError("validation must run before the adapter is consulted")
+
+    def profile(self, source: str) -> RelationProfile:  # pragma: no cover
+        raise AssertionError("a refused request profiled the datasource")
 
     def execute(self, sql: str) -> tuple[list[str], list[tuple[object, ...]]]:  # pragma: no cover
         raise AssertionError(f"a refused request reached the database: {sql!r}")

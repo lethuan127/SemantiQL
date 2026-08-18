@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import duckdb
@@ -298,8 +299,6 @@ def test_serve_exits_three_on_an_unreachable_datasource(
 
 def test_print_config_carries_a_postgres_dsn(capsys: pytest.CaptureFixture[str]) -> None:
     """The Postgres branch of the connector block, which the DuckDB test does not reach."""
-    import json
-
     code = main(
         [
             "serve",
@@ -323,8 +322,6 @@ def test_print_config_resolves_a_duckdb_database_path(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     """Every path in the block is absolute, because a relative one is why a server never appears."""
-    import json
-
     database = tmp_path / "w.duckdb"
     database.write_text("")
     assert main(["serve", "--database", str(database), "--print-config"]) == 0
@@ -372,6 +369,9 @@ def warehouse_db(tmp_path: Path) -> Path:
     setup.execute(
         "CREATE TABLE orders (id BIGINT, placed_at TIMESTAMPTZ, channel VARCHAR,"
         "                     amount DECIMAL(10,2));"
+        "INSERT INTO orders VALUES "
+        "  (1, '2026-07-01 10:00:00+00', 'web',   20.00),"
+        "  (2, '2026-07-02 10:00:00+00', 'store',  5.50);"
         "CREATE VIEW order_v AS SELECT * FROM orders;"
         "CREATE SCHEMA staging; CREATE TABLE staging.raw (blob VARCHAR)"
     )
@@ -414,8 +414,6 @@ def test_inspect_json_gives_claude_what_it_needs_to_write_a_model(
     and `carries_timezone` is what decides whether `timezone:` is needed. Writing a model from the
     native type alone would mean re-deriving a mapping the adapter already did.
     """
-    import json
-
     assert main(["inspect", "--database", str(warehouse_db), "--table", "orders", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["source"] == "orders"
@@ -429,8 +427,6 @@ def test_inspect_json_gives_claude_what_it_needs_to_write_a_model(
 def test_inspect_json_lists_relations_and_the_dialect(
     capsys: pytest.CaptureFixture[str], warehouse_db: Path
 ) -> None:
-    import json
-
     assert main(["inspect", "--database", str(warehouse_db), "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["dialect"] == "duckdb"
@@ -475,3 +471,68 @@ def test_inspect_on_a_relation_that_does_not_exist_exits_three(
     code = main(["inspect", "--database", str(warehouse_db), "--table", "nope"])
     assert code == 3
     assert "could not read" in capsys.readouterr().err
+
+
+# --- `profile` (spec 020): the verb that replaced improvised psql.
+
+
+def test_profile_needs_no_model(capsys: pytest.CaptureFixture[str], warehouse_db: Path) -> None:
+    """Like `inspect`, and for the same reason: it runs before a model exists."""
+    assert main(["profile", "--database", str(warehouse_db), "--table", "orders"]) == 0
+    out = capsys.readouterr().out
+    assert "orders:" in out
+    assert "rows" in out
+
+
+def test_profile_requires_a_table(capsys: pytest.CaptureFixture[str]) -> None:
+    """Reading every row should take a deliberate argument, not happen because a flag was omitted.
+
+    `inspect` defaults to listing everything because metadata is cheap. This does not, because on a
+    five-hundred-table warehouse the default would be five hundred full scans.
+    """
+    assert main(["profile"]) == 2
+    assert "--table" in capsys.readouterr().err
+
+
+def test_profile_reports_the_sum_that_prices_a_definition(
+    capsys: pytest.CaptureFixture[str], warehouse_db: Path
+) -> None:
+    """The figure the observed run used raw `psql` to get.
+
+    `amount` holds 20.00 and 5.50 in this fixture, so the sum is what a model author would quote
+    when
+    asking which column counts as revenue.
+    """
+    assert main(["profile", "--database", str(warehouse_db), "--table", "orders", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    by_name = {c["name"]: c for c in payload["columns"]}
+    assert payload["rows"] == 2
+    assert float(by_name["amount"]["total"]) == pytest.approx(25.5)
+    assert by_name["amount"]["nulls"] == 0
+
+
+def test_profile_json_carries_the_distribution_of_a_coded_column(
+    capsys: pytest.CaptureFixture[str], warehouse_db: Path
+) -> None:
+    """What makes a coded integer legible, and the reason the verb exists at all."""
+    assert main(["profile", "--database", str(warehouse_db), "--table", "orders", "--json"]) == 0
+    by_name = {c["name"]: c for c in json.loads(capsys.readouterr().out)["columns"]}
+    assert by_name["channel"]["values"] is not None
+    assert {value for value, _ in by_name["channel"]["values"]} == {"web", "store"}
+
+
+def test_profile_on_an_unreachable_datasource_exits_three(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = main(
+        [
+            "profile",
+            "--datasource",
+            "postgres",
+            "--dsn",
+            "postgresql://postgres@127.0.0.1:59999/nope",
+            "--table",
+            "orders",
+        ]
+    )
+    assert code == 3

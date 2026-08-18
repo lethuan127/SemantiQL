@@ -19,7 +19,14 @@ from typing import Any
 import duckdb
 from sqlglot import exp
 
-from semantiql.adapters.base import AdapterError, Column, ColumnKind
+from semantiql.adapters.base import (
+    CATEGORICAL_AT_MOST,
+    AdapterError,
+    Column,
+    ColumnKind,
+    ColumnProfile,
+    RelationProfile,
+)
 
 
 class DuckDBAdapter:
@@ -168,6 +175,107 @@ class DuckDBAdapter:
             )
             for d in described
         ]
+
+    def profile(self, source: str) -> RelationProfile:
+        """One wide aggregate pass, then one grouped query per low-cardinality column.
+
+        One pass rather than a query per column: the taxi table has nineteen columns and 2.96M rows,
+        so per-column queries would be nineteen sequential scans for no benefit. Built from
+        `relation()` for the same reason `columns()` is — a quote in `source` stays a value.
+        """
+        described = self.columns(source)
+        if not described:
+            return RelationProfile(source=source, rows=0, columns=())
+
+        relation = self.relation(source)
+        selects: list[exp.Expr] = [exp.func("count", exp.Star())]
+        for column in described:
+            reference = exp.column(column.name)
+            selects.append(exp.func("count", reference))
+            selects.append(exp.Count(this=exp.Distinct(expressions=[reference])))
+            if column.kind == "date":
+                # Rendered to text in the database because DuckDB cannot hand a `timestamptz`
+                # back to Python without `pytz`, which is not a dependency here and is not worth
+                # becoming one so a report can print a bound.
+                #
+                # Be clear about what this does *not* fix: a tz-carrying column still renders in the
+                # **session's** timezone, so this bound is not a machine-independent instant. That
+                # is
+                # inherent to the type and it is why `columns()` reports `carries_timezone` as its
+                # own bit — that flag, not a bound printed here, is what decides whether a dimension
+                # needs `timezone:` (spec 011).
+                selects.append(exp.cast(exp.func("min", reference), "VARCHAR"))
+                selects.append(exp.cast(exp.func("max", reference), "VARCHAR"))
+            elif column.kind == "number":
+                selects.append(exp.func("min", reference))
+                selects.append(exp.func("max", reference))
+            if column.kind == "number":
+                # Cast before summing, not after. `sum(x)::DECIMAL` on a DOUBLE column has already
+                # accumulated float drift by the time the cast runs — measured on Postgres, where
+                # the
+                # same sum came back as 53882224.7599785 instead of 53882224.76.
+                selects.append(exp.func("sum", exp.cast(reference, "DECIMAL(38,6)")))
+
+        wide = exp.select(*selects).from_(relation).sql(dialect="duckdb")
+        try:
+            row = self._conn.execute(wide).fetchone() or ()
+        except duckdb.Error as exc:
+            raise AdapterError(f"could not profile {source!r}: {exc}") from exc
+
+        rows = int(row[0] or 0)
+        profiles: list[ColumnProfile] = []
+        cursor = 1
+        for column in described:
+            non_null = int(row[cursor] or 0)
+            distinct = int(row[cursor + 1] or 0)
+            cursor += 2
+            minimum = maximum = total = None
+            if column.kind in {"number", "date"}:
+                minimum, maximum = row[cursor], row[cursor + 1]
+                cursor += 2
+            if column.kind == "number":
+                total = row[cursor]
+                cursor += 1
+            profiles.append(
+                ColumnProfile(
+                    name=column.name,
+                    nulls=rows - non_null,
+                    distinct=distinct,
+                    minimum=minimum,
+                    maximum=maximum,
+                    total=total,
+                    values=self._distribution(relation, column.name, column.kind == "date")
+                    if 0 < distinct <= CATEGORICAL_AT_MOST
+                    else None,
+                )
+            )
+        return RelationProfile(source=source, rows=rows, columns=tuple(profiles))
+
+    def _distribution(
+        self, relation: exp.Expr, column: str, as_text: bool = False
+    ) -> tuple[tuple[object, int], ...]:
+        """Value and row count, most frequent first.
+
+        Only reached for a column whose distinct count is already known to be small, so the GROUP BY
+        cannot produce an unbounded result.
+        """
+        reference: exp.Expr = exp.column(column)
+        counted = exp.func("count", exp.Star())
+        grouped = reference
+        if as_text:
+            reference = exp.cast(reference, "VARCHAR")
+        sql = (
+            exp.select(reference, counted)
+            .from_(relation)
+            .group_by(grouped)
+            .order_by(exp.Ordered(this=counted, desc=True))
+            .limit(CATEGORICAL_AT_MOST)
+            .sql(dialect="duckdb")
+        )
+        try:
+            return tuple((value, int(count)) for value, count in self._conn.execute(sql).fetchall())
+        except duckdb.Error as exc:
+            raise AdapterError(f"could not profile {column!r}: {exc}") from exc
 
     def execute(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
         try:
