@@ -105,6 +105,61 @@ no MVP requirement yet. When they arrive they belong at `src/semantiql/governanc
 they sit between the engine and the adapter. Stating the gap is more useful than an empty
 module that looks like a feature.
 
+## What you may do to each directory
+
+Three documents describe where things live, and they are not redundant. **The constitution's Taxonomy
+is authoritative** for what it covers; the tree above owns module ownership inside `src/`; this table
+adds the one thing neither does — **what you are allowed to do to each directory**.
+
+| Path | Holds | The rule for you |
+|---|---|---|
+| `src/semantiql/` | the four layers | module ownership is the tree at the top of this file, and `Where does my change go?` below |
+| `tests/` | three suites, mirroring `src/` | the directory says which layer; the **marker** says what it needs. A suite that cannot run must skip, never fail |
+| `examples/` | the bundled example **and** the unit suite's corpus | totals are asserted by hand. Changing a row means recomputing them |
+| `specs/` | SDD change records, an OKF bundle | validate with `specs/`, never the repo root |
+| `docs/NN-*.md` | the design docs, **including this one** | **trust-boundary artifacts.** Editing one is never routine — say so explicitly |
+| `docs/cookbooks/` | per-datasource walkthroughs | not trust-boundary. Every output must be labelled captured or not |
+| `scripts/verify.sh` | the gate | never weaken a check to make it pass. Adding a step means its cost and any skip are visible |
+| `scripts/fixtures/` | fixture loaders and the run judge | **committed on purpose**; their output goes to `.test-workspace/` |
+| `.claude-plugin/` | `marketplace.json` — the marketplace this repo *is* | shipped product. Without it `claude plugin install` cannot reach the plugin at all |
+| `plugin/` | the shipped plugin: `.mcp.json`, `skills/semantiql/SKILL.md`, `evals/` | shipped product. That `SKILL.md` is a trust boundary, and N6 applies to it as much as to code |
+| `bundle/` | a three-line entry point | the manifest and source are **generated** at build time. Never a second copy of the package in git |
+| `compose.yaml` | a throwaway Postgres | the gate may never require Docker |
+| `.specify/memory/` | the constitution | **no agent amends it.** Propose a diff and stop |
+| `.claude/` | this repo's own tooling | not shipped. Do not mix it with `.claude-plugin/` — they differ by a hyphen and are opposites |
+| `.test-workspace/` | fixture data, answer keys, run logs | git-ignored **output only**. If code lands here it is invisible to a clone |
+| `dist/` | build output | ignored |
+
+Four things that are easy to get wrong, and each has cost something:
+
+**`.claude-plugin/` and `.claude/` are opposites.** The first is shipped product — the marketplace
+manifest that makes the plugin installable. The second is this repository's own tooling. The names
+differ by a hyphen and a word.
+
+**Code in `.test-workspace/` is invisible.** Seven fixture scripts lived there while their own
+docstrings claimed *the script is the artefact and the data is output* — and a fresh clone had none of
+them (spec 022). Output belongs there; code belongs in `scripts/fixtures/`.
+
+**`bundle/` holds no copy of the package.** `scripts/build_bundle.py` generates the manifest and copies
+the source at build time, so git never carries two copies to drift apart.
+
+**Answer keys are the examiner's copy.** `.test-workspace/examiner/` must stay out of any directory a
+run under evaluation can read, or "does it ask the human what these columns mean" becomes reading
+comprehension.
+
+> **Known gap, for a human to close.** The constitution's Taxonomy predates `plugin/`,
+> `.claude-plugin/`, `bundle/` and `src/`, so it has no row for any of them — and it explicitly says
+> "the rows above cover the top level only". This table is not a substitute: the constitution governs,
+> and **no agent amends it**. The proposed rows, for a human to apply to
+> `.specify/memory/constitution.md`:
+>
+> ```
+> | `src/` | the four layers; module ownership is mapped in docs/07-code-map.md, not here |
+> | `plugin/`, `.claude-plugin/` | shipped product — the plugin, and the marketplace manifest that installs it |
+> | `bundle/` | the Desktop bundle's entry point; its manifest and source are generated at build time |
+> | `.test-workspace/` | ignored output only — fixture data, answer keys, run logs. Never code |
+> ```
+
 ## Where does my change go?
 
 | Change | Module |
