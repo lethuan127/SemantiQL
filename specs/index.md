@@ -34,4 +34,5 @@ bundle, at [.specify/memory/constitution.md](../.specify/memory/constitution.md)
 * [020-profile-through-semantiql/](020-profile-through-semantiql/) - T2, shipped - a read-only profile verb so the discovery loop stops reading rows with raw psql, and a skill rule with a test
 * [021-plugin-eval-suite/](021-plugin-eval-suite/) - T2, shipped - native evals/ cases for building, asking and enriching, graded from shipped rules over 1M real retail invoice lines
 * [022-development-environment/](022-development-environment/) - T2, shipped - seven fixture scripts were git-ignored so a fresh clone lacked them; moved to scripts/fixtures/ and the machine documented
+* [023-databricks-and-sheets/](023-databricks-and-sheets/) - T2, shipped - two datasources behind optional extras; zero files changed under engine/, which is N4's strongest evidence yet
 * [_template/](_template/) - blank artifact templates, not change records; their concepts inflate the trust and status counts above

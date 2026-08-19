@@ -160,7 +160,17 @@ class Datasource(_Strict):
     """Which engine executes, and therefore which dialect the SQL is transpiled to."""
 
     name: str
-    dialect: Literal["duckdb", "postgres"] = "duckdb"
+    dialect: Literal["duckdb", "postgres", "databricks", "sheets"] = "duckdb"
+    """The target dialect, and the name of an adapter that can honour it.
+
+    `sheets` is the odd one and deliberately so: a spreadsheet has no query engine, so its adapter
+    loads the range into DuckDB and executes there. The value names *which adapter to use*, while
+    the SQL it receives is DuckDB's — see `adapters/sheets.py` (spec 023).
+
+    Adding a value here is half of adding a datasource. The other half is an adapter, and `run`
+    refuses when a model's dialect and the adapter's disagree, so a value with no adapter behind it
+    produces a loud refusal rather than a wrong engine.
+    """
 
 
 class SemanticModel(_Strict):

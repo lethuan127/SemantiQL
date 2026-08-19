@@ -29,6 +29,14 @@ dependencies = [
   "mcp>=2,<3",
 ]
 
+# Drivers for datasources most users do not have. Optional on purpose: `uv sync` installs neither, so
+# a fresh clone stays light and the ≤15-minute setup rule is unaffected. Each adapter imports its
+# driver inside `__init__`, so a missing extra is an install instruction rather than a traceback
+# (spec 023).
+[project.optional-dependencies]
+databricks = ["databricks-sql-connector>=3,<5"]
+sheets = ["google-api-python-client>=2,<3", "google-auth>=2,<3"]
+
 [project.scripts]
 semantiql = "semantiql.cli:main"
 
@@ -68,7 +76,11 @@ files = ["src", "tests", "scripts"]
 strict = true
 # duckdb ships no stubs; treat its surface as untyped rather than weakening strict globally.
 [[tool.mypy.overrides]]
-module = ["duckdb.*"]
+# Drivers with no type stubs. `duckdb` ships none; the other two are optional extras and are not
+# installed by default, so mypy cannot see them at all on a normal clone (spec 023). Listing them
+# is not weakening a check — an unstubbed third-party module is untypeable either way, and the
+# alternative is a per-line ignore that hides a real error later.
+module = ["duckdb.*", "databricks.*", "googleapiclient.*", "google.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

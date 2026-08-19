@@ -536,3 +536,47 @@ def test_profile_on_an_unreachable_datasource_exits_three(
         ]
     )
     assert code == 3
+
+
+# --- The two datasources added by spec 023, at the CLI seam.
+
+
+@pytest.mark.parametrize("datasource", ["databricks", "sheets"])
+def test_the_new_datasources_are_accepted_choices(
+    capsys: pytest.CaptureFixture[str], datasource: str
+) -> None:
+    """Rejected by argparse would be indistinguishable from an adapter that failed to connect.
+
+    Exit 3 is the adapter's own failure — a missing driver or credential — which is what should
+    happen here, since neither optional extra is installed by default.
+    """
+    assert main(["inspect", "--datasource", datasource]) == 3
+    error = capsys.readouterr().err
+    assert "not a datasource" not in error, (
+        f"{datasource} was rejected before an adapter was opened"
+    )
+
+
+def test_an_unknown_datasource_is_still_refused(capsys: pytest.CaptureFixture[str]) -> None:
+    """Widening the choices must not turn the list into anything-goes."""
+    with pytest.raises(SystemExit):
+        main(["inspect", "--datasource", "mongodb"])
+
+
+@pytest.mark.parametrize(
+    ("datasource", "expected"),
+    [
+        ("databricks", "extra databricks"),
+        ("sheets", "extra sheets"),
+    ],
+)
+def test_a_missing_optional_driver_names_the_extra(
+    capsys: pytest.CaptureFixture[str], datasource: str, expected: str
+) -> None:
+    """The message a fresh clone gets, and it must be an instruction.
+
+    Both drivers are optional so `uv sync` stays light. The cost of that choice is paid here, in
+    the one place a user meets it, and it is paid with a command they can run.
+    """
+    assert main(["inspect", "--datasource", datasource]) == 3
+    assert expected in capsys.readouterr().err
