@@ -369,6 +369,7 @@ engine is loud rather than silently answered by the other one.
 
 ## Where to go next
 
+- [cookbooks/](cookbooks/) — the same journey as a copy-pasteable walkthrough, per datasource.
 - [09-data-modeling.md](09-data-modeling.md) — the complete model reference.
 - [02-architecture.md](02-architecture.md) — why validation is the centrepiece.
 - [05-datasources.md](05-datasources.md) — which databases are supported, and the roadmap.

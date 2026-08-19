@@ -11,6 +11,13 @@
 | v3 | ✅ **Databricks**, BigQuery, Snowflake | Warehouses — where data analysts actually work; needed for company adoption. **Databricks was brought forward** from v3 by an owner decision (spec 023), behind an optional dependency group so a default install does not carry its driver. |
 | — | ✅ **Google Sheets** | Not previously on this roadmap. Added on request (spec 023): a spreadsheet is where a surprising amount of real business data lives, and it is the only datasource here with **no query engine of its own**. |
 
+## Walkthroughs
+
+| Cookbook | What it covers |
+|---|---|
+| [cookbooks/postgres.md](cookbooks/postgres.md) | empty database → read-only role → model → answer, **every figure captured from a real run** |
+| [cookbooks/databricks.md](cookbooks/databricks.md) | the same shape on a SQL warehouse, with the workspace steps marked as **not run** |
+
 ## Two adapters that are not databases
 
 **Google Sheets has no query engine**, so its adapter borrows one: it fetches the worksheet, loads it

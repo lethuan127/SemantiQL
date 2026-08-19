@@ -14,3 +14,6 @@ Working design documents. Everything here is draft-stage and evolves as the proj
 | [08-positioning.md](08-positioning.md) | What SemantiQL aims to do differently, and how to judge it |
 | [09-data-modeling.md](09-data-modeling.md) | Writing the semantic model — every field, what it compiles to, what is refused |
 | [10-adopting-semantiql.md](10-adopting-semantiql.md) | **Start here to use it on your own data** — install, model one table, run `doctor`, ask questions |
+| [11-plugin-eval.md](11-plugin-eval.md) | The `claude plugin eval` schema, reverse-engineered from the CLI — and what remains unverified |
+| [12-development-environment.md](12-development-environment.md) | Setting up a machine: every tool, what it unlocks, and what breaks without it |
+| [cookbooks/](cookbooks/) | **End-to-end walkthroughs, one per datasource** — Postgres with every figure captured from a real run, Databricks with the workspace steps marked as not run |
