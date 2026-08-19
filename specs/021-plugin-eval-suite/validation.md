@@ -108,3 +108,36 @@ and the tests only checked that the files existed and said certain things. They 
 
 The schema — with its four genuinely unresolved edges, including the grader rubric field name — is
 written up in `docs/11-plugin-eval.md`, a **trust-boundary document** added by this amendment.
+
+
+# Second amendment — the full schema, and the cases it invalidated
+
+Asked what else `execution` carries, I went back to the binary and found **the Zod schema itself**, not
+just its error strings: the CLI embeds its own minified JavaScript, so the definition is readable with
+every field, default and bound. `docs/11-plugin-eval.md` is rewritten from it, and most of what that
+document previously listed as "not established" is now fact.
+
+**`execution` has seven fields**, not the one I had documented: `prompt`, `max_turns` (default 10, max
+200), `timeout_seconds` (default 300, max 3600), `model`, `allowed_tools`, `append_system_prompt`,
+`env`.
+
+**The cases as shipped were invalid**, in three ways, and each would have failed the whole case:
+
+1. **Every grader requires a `name`.** Mine had none. The validator also refuses
+   `duplicate grader name "X"`.
+2. **`llm` spells its target `focus`; `regex` spells it `target`.** I used `target` on an `llm` grader.
+   Every grader schema is `.strict()`, so that is a hard rejection, not a tolerated extra.
+3. **`timeout_seconds` defaults to 300**, and these cases inspect a real database. The guide embedded
+   beside the schema is blunt — *"an under-set timeout reads as a 0 score, not a timeout"* — so the
+   suite would have scored zero and looked like a capability failure.
+
+Fixed, and now enforced: `test_no_grader_carries_a_key_the_strict_schema_rejects` was watched failing
+against exactly the `focus`→`target` slip that had shipped.
+
+**The graders also changed shape, on the guide's own advice.** Its stated hierarchy is verifiable
+first, `llm` last — *"use llm only when ①-② can't capture it"*. The rules from spec 020 are facts, so
+they are now `regex` graders with `match: not_contains` and `arm: both`, plus a `tool_used` check that
+the skill loaded at all. Asking a judge whether a run used `psql` was turning a fact into an opinion.
+
+**None of this could have been found by running it** — the runner is still gated. It came from reading
+the binary, which is worth recording as the technique rather than the incident.

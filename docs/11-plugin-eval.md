@@ -44,79 +44,141 @@ This repository uses `case.yaml`. See [`../plugin/evals/`](../plugin/evals/READM
 
 ## `case.yaml`
 
-Field names below are quoted from the binary's own validation messages, which is the strongest evidence
-available without running it.
+The complete schema, recovered from the Zod definition embedded in the binary. Every field, default and
+bound below is read from that definition rather than inferred.
 
 ```yaml
-schema_version: "1.0"        # required — "missing required field schema_version (e.g. \"1.0\")"
-name: build-the-model
-tags: [build, discovery]     # filterable with --tag
-runs: 3                      # --help: "default: case.runs ?? 3"
+schema_version: "1.0"          # required. Major must be ≤ 1; this binary writes "1.1"
+name: build-the-model          # required, non-empty
+description: …                 # optional
+tags: []                       # default []
+plugins: […]                   # optional — which plugins to load
 
-execution:
-  prompt: |                  # either this…
-    Build me a semantic model for the database in my environment.
+context:                       # default {add_dirs: []}
+  scaffold_script: ./setup.sh  # optional; runs only with --scaffold
+  history_file: …              # optional; the alternative to execution.prompt
+  add_dirs: []                 # default []
 
-context:
-  history_file: …            # …or this. "either execution.prompt or context.history_file is required"
+execution:                     # required
+  prompt: |                    # optional — but one of this or context.history_file must exist
+    …
+  max_turns: 10                # default 10, integer, 1..200
+  timeout_seconds: 300         # default 300, integer, 1..3600
+  model: sonnet                # optional
+  allowed_tools: []            # default []
+  append_system_prompt: …      # optional
+  env: {}                      # default {} — string to string
 
-scaffold_script: ./setup.sh  # author-supplied bash, off unless --scaffold is passed
+runs: 3                        # default 3, integer, 1..50
+expected_outcome: …            # optional
 
-graders:
+graders:                       # required, at least one, names must be unique
   - type: llm
-    target: both
+    name: asks-before-writing
     criteria: |
-      The rubric the judge grades against.
+      …
 ```
 
-Established messages, verbatim:
+**`execution` carries seven fields, not one.** `max_turns` and `timeout_seconds` are the two that bite:
+both have defaults that are fine for a toy case and wrong for real work, and the authoring guide
+embedded beside the schema is blunt about the second — *"an under-set timeout reads as a 0 score, not a
+timeout"*. A case that does database discovery will exceed 300 seconds and be scored zero for it.
+
+Validation messages, verbatim:
 
 - `case.yaml must be a YAML object`
 - `missing required field schema_version (e.g. "1.0")`
+- `schema_version "X" is not a valid version string`
+- `schema_version "X" requires a newer Claude Code (this binary supports up to N.x)`
 - `either execution.prompt or context.history_file is required`
-- `invalid case.yaml:` *(prefix for the above)*
+- `duplicate grader name "X"`
 
 ## Graders
 
-**Six types**, from the validator's own error text:
+Six types. **Every schema is `.strict()`**, so an unknown key is an error rather than something the
+runtime tolerates — and **every grader requires a `name`**, which must be unique within the case.
 
-> `: frontmatter must include "type:" (regex | tool_order | tool_used | file_exists | llm | baseline)`
-
-| Type | Grades |
+| Type | Fields |
 |---|---|
-| `regex` | a pattern against the target |
-| `tool_order` | that tools were called in a given order |
-| `tool_used` | that a tool was called at all |
-| `file_exists` | that the run produced a file |
-| `llm` | a rubric, judged by a model (`--judge-model`, default haiku) |
-| `baseline` | against the no-plugin arm — the `--ablation` comparison |
+| `regex` | `name`, `pattern`, `target` = `last_message`, `flags` = `""`, `match` = `contains`, `weight` = 1, `arm?` |
+| `tool_used` | `name`, `tool`, `input_match?`, `min?`, `max?`, `weight` = 1, `arm?` |
+| `tool_order` | `name`, `before`, `after`, `weight` = 1, `arm?` |
+| `file_exists` | `name`, `path`, `exists` = `true`, `weight` = 1, `arm?` |
+| `llm` | `name`, `criteria`, `focus` = `last_message`, `weight` = 1, `arm?` |
+| `baseline` | `name`, `baseline_file`, `criteria`, `weight` = 1, `arm?` |
 
-The mix is the point: four of the six are **deterministic**. A rule like "never ran `psql`" is a fact and
-belongs in a `regex` grader; only "did it ask the right question" needs `llm`. Putting a checkable rule
-behind a judge converts a fact into an opinion.
+**`target` and `focus` are the same union**, and note that `llm` spells it `focus` while `regex` spells
+it `target` — a `.strict()` schema means using the wrong one is a hard error:
 
-**Targets** — these literals sit beside the parser, so the list is likely but not confirmed complete:
-`trace`, `last_message`, `files`, `source`, `file`, `both`, `input_match`.
+```
+trace | last_message | files | {source: file, path: <path>}
+```
 
-In the `prompt.md` shape each grader is its own `.md` file whose **frontmatter must carry `type:`** —
-`grader .md: frontmatter missing type`. In the `case.yaml` shape they are a list under `graders`.
+- `flags` must be JS RegExp flags — `d g i m s u v y`.
+- `match` is `contains`, `not_contains`, or `count:N`.
+- `arm` is `with-only` or `both`, and it matters under ablation.
+- `tool_used.min` defaults to **1**. For "must NOT call tool X" the guide is explicit: set `min: 0`,
+  `max: 0` **and** `arm: both` — omitting `min` leaves it at 1, and omitting `arm` on `tool: Skill`
+  makes the grader display-only.
 
-## What is not established
+**`files` is a list of paths, not contents.** As a `target`/`focus` it is the newline-separated list of
+files *created* during the run — paths only, and a file that existed before the run never appears even
+if it was modified. `file_exists` reads that same list, so a pre-existing file grades as **absent**. To
+grade what is inside a created file, use `{source: file, path: …}`.
 
-Honesty about the edges, because a guess here fails a run for the wrong reason:
+## The `prompt.md` shape
 
-- **The grader object's rubric field name.** `criteria` is this repository's choice. The binary shows
-  `type` and the target vocabulary but no literal for the body field. **`--strict` is the way to find
-  out**: `--help` says it fails "on unrecognized fields", so the first strict run names any field this
-  schema got wrong.
-- **`prompt.md` frontmatter keys.** The parser reports `prompt.md: unknown frontmatter key "…" (expected
-  one of: …)`, so an allowlist exists, but its contents are built at runtime and not readable as a
-  literal.
-- **Whether `graders/` sits inside each case directory or at the `evals/` root.** `--help` writes
-  `evals/**/prompt.md + graders/*.md`, and `init --bare` is documented as writing "prompt.md +
-  graders/criteria.md". Both readings are consistent with that.
-- **Per-case `max_turns` and `timeout_seconds`.** `--help` mentions both as bounding a run, so they are
-  probably case fields, but no validation message names them.
+The same case expressed as files. A grader's **filename is its `name`**, and its markdown **body**
+becomes the field named for its type: `criteria` for `llm` and `baseline`, `pattern` for `regex`.
+
+```
+evals/
+└── 01-say-hello/
+    ├── prompt.md
+    └── graders/
+        ├── greets-by-name.md
+        └── friendly-tone.md
+```
+
+`graders/` sits **inside** the case directory — that was an open question here and the guide's own
+example settles it.
+
+`prompt.md` frontmatter has two allowlists, and a key outside both is an error naming every accepted
+key:
+
+| Goes to the case | Goes to `execution` |
+|---|---|
+| `schema_version`, `name`, `description`, `tags`, `plugins`, `runs`, `expected_outcome` | `model`, `max_turns`, `timeout_seconds`, `allowed_tools`, `append_system_prompt`, `env` |
+
+Caps worth knowing: a prose `.md` is capped at **1 MiB**, and `graders/` at **256** files.
+
+## What the embedded guide says about writing them
+
+Shipped in the same binary, and more opinionated than the schema:
+
+- **Every case runs twice** — with the plugin and without — so the headline number is **Δ, the uplift**,
+  not the pass rate. `--ablation with-without`.
+- **Prefer verifiable graders.** The stated hierarchy is ① regex / `file_exists` / exit code ②
+  binary criterion ③ n-ary ④ llm rubric ⑤ preference, and *"use llm only when ①-② can't capture it"*.
+  Four of the six types are deterministic; a rule like "never ran `psql`" is a fact and belongs in a
+  `regex` grader with `match: not_contains`.
+- **Use a big judge, and not the agent's own model.** *"Small judges miss nuance"*, and a judge that is
+  the same model as the agent has a self-preference. `--judge-model sonnet` or larger.
+- **Set `timeout_seconds` on every case.** An under-set timeout scores 0 and looks like a failure.
+- **No absolute paths and no `~/`** in prompts or graders: cases run in a sandbox cwd.
+- **Read `evals/results/*/aggregate-result.json`.** If `suite.plugins` is `[]` the plugin did not load
+  and the whole run is meaningless. Its top-level `costUsd` is one run of one arm pair — multiply by
+  `runs` for the real bill.
+- **An implausible score jump is judge-gaming until proven otherwise**, by hand.
+
+## What is still not established
+
+- **How `case.yaml` and `prompt.md` merge** when both exist. There is a merge function — case fields
+  win at the top, `execution` is spread over, graders concatenate — but the precedence has not been
+  exercised.
+- **Whether `plugins:` names a marketplace id or a path.**
+- **Everything above is read from version 2.1.226.** An undocumented format can change silently, so
+  re-run the recipe below before trusting this against a newer CLI.
 
 ## The flags worth knowing
 
@@ -149,5 +211,8 @@ for s in re.findall(rb"[ -~]{4,}", data[i-9000:i+9000]):
 EOF
 ```
 
-Searching for `case.yaml`, `frontmatter must include`, and `scaffold_script` finds the three clusters
-that carry the schema. Nothing here required network access or an entitlement.
+Searching for `case.yaml`, `frontmatter must include`, and `scaffold_script` finds the clusters that
+carry the schema. **The binary embeds its own minified JavaScript**, so the Zod definition itself is
+readable once you find it — search for `schema_version:Le.string()` and print a few kilobytes as ASCII.
+That is where every default and bound on this page came from, and it is far better evidence than the
+error strings alone. Nothing here required network access or an entitlement.

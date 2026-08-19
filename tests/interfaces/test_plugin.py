@@ -590,6 +590,73 @@ def test_every_case_carries_the_fields_the_validator_requires() -> None:
         assert case.get("graders"), f"{phase}: no graders, so nothing would score it"
 
 
+#: Every grader schema, from the Zod definition embedded in the CLI binary. All are `.strict()`, so
+#: an unknown key is an error rather than something the runtime tolerates — which is why this is a
+#: whitelist and not a spot-check (docs/11-plugin-eval.md).
+GRADER_FIELDS = {
+    "regex": {"type", "name", "pattern", "target", "flags", "match", "weight", "arm"},
+    "tool_used": {"type", "name", "tool", "input_match", "min", "max", "weight", "arm"},
+    "tool_order": {"type", "name", "before", "after", "weight", "arm"},
+    "file_exists": {"type", "name", "path", "exists", "weight", "arm"},
+    "llm": {"type", "name", "criteria", "focus", "weight", "arm"},
+    "baseline": {"type", "name", "baseline_file", "criteria", "weight", "arm"},
+}
+
+
+def test_no_grader_carries_a_key_the_strict_schema_rejects() -> None:
+    """`.strict()` means a stray key fails the case, not the field.
+
+    The trap this caught for real: `llm` spells its target `focus` and `regex` spells it `target`.
+    Using the wrong one reads perfectly and is rejected outright.
+    """
+    for phase in PHASES:
+        for grader in _case(phase)["graders"]:
+            allowed = GRADER_FIELDS[grader["type"]]
+            extra = set(grader) - allowed
+            assert not extra, f"{phase}/{grader.get('name')}: rejected keys {sorted(extra)}"
+
+
+def test_every_grader_has_a_unique_name() -> None:
+    """`name` is required on every grader, and the validator refuses `duplicate grader name "X"`."""
+    for phase in PHASES:
+        names = [g.get("name") for g in _case(phase)["graders"]]
+        assert all(names), f"{phase}: a grader has no name, which the schema requires"
+        assert len(names) == len(set(names)), f"{phase}: duplicate grader names {names}"
+
+
+def test_each_case_sets_a_timeout_long_enough_to_do_real_work() -> None:
+    """The default is 300s, and the embedded guide is blunt: an under-set timeout scores 0.
+
+    These cases inspect a real database and write a model. At the default they would fail as a
+    capability problem when the truth is a clock problem — the worst kind of red test.
+    """
+    for phase in PHASES:
+        execution = _case(phase)["execution"]
+        timeout = execution.get("timeout_seconds")
+        assert timeout and timeout > 300, (
+            f"{phase}: timeout_seconds={timeout} is the default or less"
+        )
+        assert timeout <= 3600, f"{phase}: timeout_seconds={timeout} exceeds the schema's maximum"
+
+
+def test_the_deterministic_rules_are_not_left_to_the_judge() -> None:
+    """The guide's hierarchy: verifiable first, `llm` only for what regex cannot capture.
+
+    "Never ran psql" is a fact. Asking a model to assess it turns a fact into an opinion, and it is
+    the rule spec 020 exists to enforce — so it is a `regex` grader with `match: not_contains`.
+    """
+    build = _case("01-build-the-model")["graders"]
+    kinds = {g["type"] for g in build}
+    assert "regex" in kinds and "tool_used" in kinds, (
+        "the build case leans entirely on the judge for rules that are checkable"
+    )
+    guards = [g for g in build if g["type"] == "regex" and g.get("match") == "not_contains"]
+    assert guards, "no not_contains guard, so nothing deterministically forbids raw SQL or writes"
+    assert all(g.get("arm") == "both" for g in guards), (
+        "a must-not guard scored on one arm only cannot see the behaviour it forbids"
+    )
+
+
 def test_every_grader_declares_a_type_the_runner_knows() -> None:
     """Six types, from the validator: regex | tool_order | tool_used | file_exists | llm | baseline.
 

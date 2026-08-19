@@ -5,14 +5,32 @@ tags: [ask, query, refusal]
 runs: 3
 
 execution:
+  # 300s is the default and far too short for a run that inspects a real database; the embedded
+  # guide is explicit that an under-set timeout "reads as a 0 score, not a timeout".
+  timeout_seconds: 1800
+  max_turns: 60
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
   prompt: |
     What were our total sales by country last year, and how does that split by month?
 
     Also — what were sales by product category?
 
 graders:
+  - type: regex
+    name: truncated-the-date-correctly
+    target: trace
+    pattern: "DATE_TRUNC"
+    match: contains
+    arm: with-only
+  - type: regex
+    name: never-used-extract-or-month
+    target: trace
+    pattern: "(?i)\\b(EXTRACT\\s*\\(|MONTH\\s*\\()"
+    match: not_contains
+    arm: both
   - type: llm
-    target: both
+    name: judged-against-the-ask-rubric
+    focus: last_message
     criteria: |
       # Phase 2 — answering from a model that already exists
 

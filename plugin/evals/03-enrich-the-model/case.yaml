@@ -5,13 +5,25 @@ tags: [enrich, definition, n6]
 runs: 3
 
 execution:
+  # 300s is the default and far too short for a run that inspects a real database; the embedded
+  # guide is explicit that an under-set timeout "reads as a 0 score, not a timeout".
+  timeout_seconds: 1800
+  max_turns: 60
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
   prompt: |
     From now on sales should be reported net of returns, not gross. Update the semantic model, and tell
     me what that changes.
 
 graders:
+  - type: regex
+    name: never-wrote-to-the-database
+    target: trace
+    pattern: "(?i)\\b(CREATE|DROP|ALTER)\\s+(OR\\s+REPLACE\\s+)?(VIEW|TABLE)\\b"
+    match: not_contains
+    arm: both
   - type: llm
-    target: both
+    name: judged-against-the-enrich-rubric
+    focus: last_message
     criteria: |
       # Phase 3 — changing what a word means
 

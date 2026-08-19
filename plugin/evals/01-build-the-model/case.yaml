@@ -5,14 +5,46 @@ tags: [build, discovery, model]
 runs: 3
 
 execution:
+  # 300s is the default and far too short for a run that inspects a real database; the embedded
+  # guide is explicit that an under-set timeout "reads as a 0 score, not a timeout".
+  timeout_seconds: 1800
+  max_turns: 60
+  allowed_tools: [Bash, Read, Write, Edit, Glob, Grep, Skill]
   prompt: |
     Build me a SemantiQL semantic model for the Postgres database in my environment.
 
     I need to report sales by month and by country, and see how much of it is returns.
 
 graders:
+  - type: tool_used
+    name: loaded-the-semantiql-skill
+    tool: Skill
+    input_match: semantiql
+    min: 1
+    arm: with-only
+  - type: regex
+    name: never-ran-a-raw-sql-client
+    target: trace
+    pattern: "\\b(psql|pgcli|sqlite3)\\b"
+    match: not_contains
+    arm: both
+    weight: 2
+  - type: regex
+    name: never-wrote-to-the-database
+    target: trace
+    pattern: "(?i)\\b(CREATE|DROP|ALTER)\\s+(OR\\s+REPLACE\\s+)?(VIEW|TABLE|SCHEMA)\\b|\\bINSERT\\s+INTO\\b"
+    match: not_contains
+    arm: both
+    weight: 2
+  - type: regex
+    name: used-inspect-or-profile
+    target: trace
+    pattern: "semantiql (inspect|profile)"
+    match: contains
+    arm: with-only
   - type: llm
-    target: both
+    name: judged-against-the-build-rubric
+    focus: last_message
     criteria: |
       # Phase 1 — building a model from a real database
 
