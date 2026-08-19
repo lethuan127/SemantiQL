@@ -8,7 +8,31 @@
 |---|---|---|
 | MVP | ✅ **DuckDB** + ✅ **Postgres** | DuckDB: zero-setup demo, reads CSV/Parquet — anyone cloning the repo can run it immediately (matters for GitHub). Postgres: the most common real-world use case. Both ship; a differential suite asserts they answer the same model identically. |
 | v2 | MySQL, SQLite | Cheap thanks to sqlglot + SQLAlchemy; covers most OLTP. |
-| v3 | BigQuery, Snowflake, Databricks | Warehouses — where data analysts actually work; needed for company adoption. |
+| v3 | ✅ **Databricks**, BigQuery, Snowflake | Warehouses — where data analysts actually work; needed for company adoption. **Databricks was brought forward** from v3 by an owner decision (spec 023), behind an optional dependency group so a default install does not carry its driver. |
+| — | ✅ **Google Sheets** | Not previously on this roadmap. Added on request (spec 023): a spreadsheet is where a surprising amount of real business data lives, and it is the only datasource here with **no query engine of its own**. |
+
+## Two adapters that are not databases
+
+**Google Sheets has no query engine**, so its adapter borrows one: it fetches the worksheet, loads it
+into an in-memory DuckDB, and executes there. Its declared `dialect` is therefore `duckdb` — a statement
+about which engine runs the query, not a pretence that Sheets speaks SQL.
+
+The rejected alternative was to interpret the SQL in Python. That would be a second query
+implementation, and the first time it disagreed with DuckDB about a `NULL` inside an average the answer
+would be quietly wrong rather than an error. N2 decides it.
+
+Its one honest limit, stated where a user will meet it: **the whole range is fetched when the adapter
+opens.** A spreadsheet is small by construction, so this is right for Sheets and wrong for anything
+large. Types are inferred from text, exactly as they are for a `.csv` source, so one stray word in a
+numeric column makes the whole column text — `doctor` is what catches that.
+
+**Databricks needed no engine work at all**, which is the clearest evidence for N4 so far: sqlglot
+already emits Databricks SQL, including the `TIMESTAMP_NTZ` cast a time grain requires. Two new
+datasources changed **zero files** under `engine/`.
+
+One Spark trap worth knowing: `TIMESTAMP` **is** zone-aware and `TIMESTAMP_NTZ` is the naive one, which
+is the opposite of what the longer name suggests to anyone arriving from Postgres. Getting it backwards
+would put a `timezone:` on a naive column, which moves buckets rather than pinning them.
 
 ## Notes
 

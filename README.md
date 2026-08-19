@@ -156,7 +156,7 @@ LLMs answering questions over raw SQL schemas are wrong most of the time (~16% a
 |---|---|
 | MVP | ✅ DuckDB + Postgres · ✅ semantic model YAML · ✅ semantic SQL → raw SQL engine · ✅ MCP server for Claude · accuracy benchmark vs. raw-table querying |
 | Next | MySQL, SQLite · verified-examples loop |
-| Later | BigQuery, Snowflake, Databricks · remote server mode · access control |
+| Later | ✅ Databricks · ✅ Google Sheets · BigQuery, Snowflake · remote server mode · access control |
 
 Out of scope: NoSQL databases (MongoDB, etc.).
 

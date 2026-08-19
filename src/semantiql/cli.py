@@ -39,6 +39,17 @@ DATASOURCE_ENV = "SEMANTIQL_DATASOURCE"
 DSN_ENV = "SEMANTIQL_DSN"
 DATABASE_ENV = "SEMANTIQL_DATABASE"
 
+#: Databricks and Google Sheets (spec 023). Each datasource reads its own variables, and the
+#: Databricks ones keep the driver's own names, so anyone who has already configured a Databricks
+#: CLI has them set.
+DBX_HOST_ENV = "DATABRICKS_SERVER_HOSTNAME"
+DBX_HTTP_PATH_ENV = "DATABRICKS_HTTP_PATH"
+DBX_TOKEN_ENV = "DATABRICKS_TOKEN"
+DBX_CATALOG_ENV = "DATABRICKS_CATALOG"
+DBX_SCHEMA_ENV = "DATABRICKS_SCHEMA"
+SHEET_ID_ENV = "SEMANTIQL_SHEET_ID"
+SHEET_CREDENTIALS_ENV = "SEMANTIQL_SHEET_CREDENTIALS"
+
 DEFAULT_DUCKDB = ":memory:"
 
 #: Verbs the docs and roadmap promise but that are not built yet. Without this, `semantiql
@@ -90,6 +101,23 @@ def _open_adapter(args: argparse.Namespace) -> Adapter:
     """
     if args.datasource == "postgres":
         return PostgresAdapter(args.dsn or "")
+    if args.datasource == "databricks":
+        from semantiql.adapters.databricks import DatabricksAdapter
+
+        return DatabricksAdapter(
+            server_hostname=args.dbx_host or os.environ.get(DBX_HOST_ENV, ""),
+            http_path=args.dbx_http_path or os.environ.get(DBX_HTTP_PATH_ENV, ""),
+            access_token=args.dbx_token or os.environ.get(DBX_TOKEN_ENV, ""),
+            catalog=args.dbx_catalog or os.environ.get(DBX_CATALOG_ENV, ""),
+            schema=args.dbx_schema or os.environ.get(DBX_SCHEMA_ENV, ""),
+        )
+    if args.datasource == "sheets":
+        from semantiql.adapters.sheets import SheetsAdapter
+
+        return SheetsAdapter(
+            spreadsheet_id=args.sheet_id or os.environ.get(SHEET_ID_ENV, ""),
+            credentials_file=args.sheet_credentials or os.environ.get(SHEET_CREDENTIALS_ENV, ""),
+        )
     return DuckDBAdapter(args.database or DEFAULT_DUCKDB)
 
 
@@ -406,9 +434,47 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--show-sql", action="store_true", help="print the generated physical SQL")
     parser.add_argument(
         "--datasource",
-        choices=["duckdb", "postgres"],
+        choices=["duckdb", "postgres", "databricks", "sheets"],
         default="duckdb",
-        help="which datasource to open (default: duckdb)",
+        help="which datasource to open (default: duckdb). databricks and sheets each need their "
+        "optional extra installed: `uv sync --extra databricks` or `--extra sheets`",
+    )
+    parser.add_argument(
+        "--dbx-host",
+        default=None,
+        help=f"Databricks workspace hostname (default: ${DBX_HOST_ENV}). Databricks only",
+    )
+    parser.add_argument(
+        "--dbx-http-path",
+        default=None,
+        help=f"Databricks SQL warehouse HTTP path (default: ${DBX_HTTP_PATH_ENV}). Databricks only",
+    )
+    parser.add_argument(
+        "--dbx-token",
+        default=None,
+        help=f"Databricks access token (default: ${DBX_TOKEN_ENV}). Prefer the environment "
+        "variable: a token on a command line reaches shell history and every process listing",
+    )
+    parser.add_argument(
+        "--dbx-catalog",
+        default=None,
+        help=f"Unity Catalog catalog (default: ${DBX_CATALOG_ENV}). Databricks only",
+    )
+    parser.add_argument(
+        "--dbx-schema",
+        default=None,
+        help=f"Databricks schema (default: ${DBX_SCHEMA_ENV}, else 'default'). Databricks only",
+    )
+    parser.add_argument(
+        "--sheet-id",
+        default=None,
+        help=f"Google spreadsheet id (default: ${SHEET_ID_ENV}). Sheets only",
+    )
+    parser.add_argument(
+        "--sheet-credentials",
+        default=None,
+        help=f"path to a service-account JSON file (default: ${SHEET_CREDENTIALS_ENV}). The "
+        "read-only spreadsheets scope is enough. Sheets only",
     )
     parser.add_argument(
         "--database",
